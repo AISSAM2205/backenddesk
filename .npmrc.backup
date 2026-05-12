@@ -1,0 +1,8 @@
+legacy-peer-deps=true
+registry=http://172.29.7.156:8081/repository/npm-public2/
+init.author.name=Marwane
+init.author.email=m.belahcen@attijariwafa.com
+email=m.belahcen@attijariwafa.com
+always-auth=true
+//172.29.7.156:8081/repository/npm-public2/:_auth="b2N0bzpQYTEyMzQ1Ng=="
+

@@ -2,297 +2,242 @@
 import React, { useState } from 'react';
 import { useAdmin } from '../../contexts/AdminContext';
 import { Plus, Edit, Trash2, Save, X, Briefcase } from 'lucide-react';
-import { INSTRUMENT_TYPES, CURRENCIES, RATING_SCALE, CLN_REGIONS } from '../../utils/constants';
-import { formatDate, formatCurrency } from '../../utils/formatters';
+
+const CONFIGS = {
+  eurobonds: {
+    name: 'EuroBonds', badgeClass: 'badge-eb',
+    fields: [
+      { key: 'isin',        label: 'ISIN',        type: 'text',   required: true },
+      { key: 'description', label: 'Description', type: 'text',   required: true },
+      { key: 'issuer',      label: 'Émetteur',    type: 'text',   required: true },
+      { key: 'coupon',      label: 'Coupon %',    type: 'number', required: true, step: '0.001' },
+      { key: 'maturity',    label: 'Échéance',    type: 'date',   required: true },
+      { key: 'currency',    label: 'Devise',      type: 'select', required: true, options: ['EUR', 'USD'] },
+      { key: 'rating',      label: 'Rating',      type: 'select', required: false, options: ['AAA','AA+','AA','AA-','A+','A','A-','BBB+','BBB','BBB-','BB+','BB','BB-','B+','B','B-'] },
+    ],
+  },
+  cln: {
+    name: 'CLN', badgeClass: 'badge-cln',
+    fields: [
+      { key: 'id',          label: 'CLN ID',           type: 'text',   required: true },
+      { key: 'reference',   label: 'Entité référence',  type: 'text',   required: true },
+      { key: 'description', label: 'Description',       type: 'text',   required: true },
+      { key: 'region',      label: 'Région',            type: 'select', required: true, options: ['MOROC', 'GCC', 'AFRICA', 'OTHER'] },
+      { key: 'premium',     label: 'Prime %',           type: 'number', required: true, step: '0.01' },
+      { key: 'spread',      label: 'Spread bp',         type: 'number', required: true },
+      { key: 'maturity',    label: 'Échéance',          type: 'date',   required: true },
+      { key: 'issuer',      label: 'Émetteur',          type: 'text',   required: true },
+    ],
+  },
+  egp: {
+    name: 'EGP Bills', badgeClass: 'badge-egp',
+    fields: [
+      { key: 'id',           label: 'Bill ID',       type: 'text',   required: true },
+      { key: 'isin',         label: 'ISIN',          type: 'text',   required: true },
+      { key: 'description',  label: 'Description',   type: 'text',   required: true },
+      { key: 'yield',        label: 'Rendement %',   type: 'number', required: true, step: '0.01' },
+      { key: 'duration_days',label: 'Durée (jours)', type: 'number', required: true },
+      { key: 'maturity',     label: 'Échéance',      type: 'date',   required: true },
+      { key: 'issuer',       label: 'Émetteur',      type: 'text',   required: true },
+    ],
+  },
+};
+
+const TYPE_TABS = [
+  { key: 'eurobonds', label: 'EuroBonds', accent: 'var(--eb)'  },
+  { key: 'cln',       label: 'CLN',       accent: 'var(--cln)' },
+  { key: 'egp',       label: 'EGP Bills', accent: 'var(--egp)' },
+];
 
 const InstrumentManager = () => {
   const { instruments, createInstrument, updateInstrument, deleteInstrument } = useAdmin();
   const [selectedType, setSelectedType] = useState('eurobonds');
   const [editing, setEditing] = useState(null);
-  const [adding, setAdding] = useState(false);
-  const [formData, setFormData] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [adding,  setAdding]  = useState(false);
+  const [form,    setForm]    = useState({});
+  const [saving,  setSaving]  = useState(false);
 
-  const instrumentConfigs = {
-    eurobonds: {
-      name: 'EuroBonds',
-      fields: [
-        { key: 'isin', label: 'ISIN', type: 'text', required: true },
-        { key: 'description', label: 'Description', type: 'text', required: true },
-        { key: 'issuer', label: 'Issuer', type: 'text', required: true },
-        { key: 'coupon', label: 'Coupon (%)', type: 'number', required: true, step: '0.01' },
-        { key: 'maturity', label: 'Maturity', type: 'date', required: true },
-        { key: 'currency', label: 'Currency', type: 'select', options: ['EUR', 'USD'], required: true },
-        { key: 'rating', label: 'Rating', type: 'select', options: RATING_SCALE, required: true }
-      ]
-    },
-    cln: {
-      name: 'Credit Linked Notes',
-      fields: [
-        { key: 'id', label: 'CLN ID', type: 'text', required: true },
-        { key: 'reference', label: 'Reference Entity', type: 'text', required: true },
-        { key: 'description', label: 'Description', type: 'text', required: true },
-        { key: 'region', label: 'Region', type: 'select', options: Object.values(CLN_REGIONS), required: true },
-        { key: 'premium', label: 'Premium (%)', type: 'number', required: true, step: '0.01' },
-        { key: 'spread', label: 'Spread (bp)', type: 'number', required: true },
-        { key: 'maturity', label: 'Maturity', type: 'date', required: true },
-        { key: 'issuer', label: 'Issuer', type: 'text', required: true }
-      ]
-    },
-    egp: {
-      name: 'EGP Bills',
-      fields: [
-        { key: 'id', label: 'Bill ID', type: 'text', required: true },
-        { key: 'isin', label: 'ISIN', type: 'text', required: true },
-        { key: 'description', label: 'Description', type: 'text', required: true },
-        { key: 'yield', label: 'Yield (%)', type: 'number', required: true, step: '0.01' },
-        { key: 'duration_days', label: 'Duration (days)', type: 'number', required: true },
-        { key: 'maturity', label: 'Maturity', type: 'date', required: true },
-        { key: 'issuer', label: 'Issuer', type: 'text', required: true }
-      ]
-    }
-  };
+  const config = CONFIGS[selectedType];
+  const list   = instruments[selectedType] || [];
 
-  const currentConfig = instrumentConfigs[selectedType];
-  const currentInstruments = instruments[selectedType] || [];
+  const initForm = () => Object.fromEntries(config.fields.map(f => [f.key, f.type === 'number' ? '' : '']));
 
-  const initFormData = () => {
-    const data = {};
-    currentConfig.fields.forEach(field => {
-      data[field.key] = field.type === 'number' ? 0 : '';
-    });
-    return data;
-  };
+  const openAdd  = () => { setAdding(true); setEditing(null); setForm(initForm()); };
+  const openEdit = (item) => { setEditing(item.id || item.isin); setAdding(false); setForm({ ...item }); };
+  const cancel   = () => { setAdding(false); setEditing(null); setForm({}); };
+  const set      = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  const handleAdd = () => {
-    setAdding(true);
-    setFormData(initFormData());
-  };
-
-  const handleEdit = (instrument) => {
-    setEditing(instrument.id || instrument.isin);
-    setFormData({ ...instrument });
-  };
-
-  const handleSave = async () => {
-    setLoading(true);
+  const save = async () => {
+    setSaving(true);
     try {
-      if (adding) {
-        await createInstrument(selectedType, formData);
-      } else {
-        await updateInstrument(selectedType, editing, formData);
-      }
-      handleCancel();
-    } catch (error) {
-      console.error('Error saving instrument:', error);
-    } finally {
-      setLoading(false);
-    }
+      adding ? await createInstrument(selectedType, form) : await updateInstrument(selectedType, editing, form);
+      cancel();
+    } finally { setSaving(false); }
   };
 
-  const handleDelete = async (instrument) => {
-    const id = instrument.id || instrument.isin;
-    if (window.confirm(`Are you sure you want to delete ${id}?`)) {
-      try {
-        await deleteInstrument(selectedType, id);
-      } catch (error) {
-        console.error('Error deleting instrument:', error);
-      }
-    }
+  const del = (item) => {
+    const id = item.id || item.isin;
+    if (window.confirm(`Supprimer l'instrument ${id} ?`)) deleteInstrument(selectedType, id);
   };
 
-  const handleCancel = () => {
-    setAdding(false);
-    setEditing(null);
-    setFormData({});
-  };
-
-  const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const renderField = (field) => {
-    const value = formData[field.key] || '';
-    
-    if (field.type === 'select') {
-      return (
-        <select
-          value={value}
-          onChange={(e) => handleChange(field.key, e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-          required={field.required}
-        >
-          <option value="">Select...</option>
-          {field.options.map(option => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
-      );
-    }
-    
-    return (
-      <input
-        type={field.type}
-        value={value}
-        onChange={(e) => handleChange(field.key, e.target.value)}
-        step={field.step}
-        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-        required={field.required}
-      />
-    );
+  const fDate = (d) => {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' }); }
+    catch { return d; }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Instrument Type Selector */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Instruments Management</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Create and manage trading instruments across all asset classes</p>
-        
-        <div className="flex flex-wrap gap-3">
-          {Object.entries(instrumentConfigs).map(([key, config]) => (
-            <button
-              key={key}
-              onClick={() => setSelectedType(key)}
-              className={`px-6 py-3 rounded-lg font-medium transition-colors ${
-                selectedType === key 
-                  ? 'bg-primary-600 dark:bg-primary-500 text-white shadow-lg' 
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600'
-              }`}
-            >
-              {config.name}
-            </button>
-          ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h3 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.80rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+            Référentiel Instruments
+          </h3>
+          <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.68rem', color: 'var(--tx3)', marginTop: 3 }}>
+            Gérez les instruments par classe d'actifs
+          </p>
         </div>
+        <button onClick={openAdd} className="btn btn-primary btn-sm">
+          <Plus size={12} />Ajouter
+        </button>
       </div>
 
-      {/* Actions */}
-      <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <div>
-          <h4 className="text-xl font-bold text-gray-900 dark:text-white">{currentConfig.name}</h4>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manage {currentConfig.name.toLowerCase()} in your portfolio</p>
-        </div>
-        <button
-          onClick={handleAdd}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-600 dark:bg-primary-500 text-white rounded-lg hover:bg-primary-700 dark:hover:bg-primary-600 transition-colors shadow-md"
-        >
-          <Plus className="w-4 h-4" />
-          Add {currentConfig.name}
-        </button>
+      {/* Type selector */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {TYPE_TABS.map(({ key, label, accent }) => {
+          const active = selectedType === key;
+          const count = (instruments[key] || []).length;
+          return (
+            <button key={key} onClick={() => { setSelectedType(key); cancel(); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                border: '1px solid',
+                borderColor: active ? accent + '66' : 'var(--b1)',
+                background: active ? 'var(--surf)' : 'var(--base)',
+                transition: 'all 0.14s',
+              }}>
+              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 600, fontSize: '0.68rem', letterSpacing: '0.05em', textTransform: 'uppercase', color: active ? 'var(--tx1)' : 'var(--tx2)' }}>
+                {label}
+              </span>
+              <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', fontWeight: 600, color: active ? accent : 'var(--tx3)', padding: '1px 6px', borderRadius: 4, background: active ? 'var(--elev)' : 'transparent' }}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Form */}
       {(adding || editing) && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <h4 className="text-xl font-bold text-gray-900 dark:text-white">
-              {adding ? 'Add' : 'Edit'} {currentConfig.name}
+        <div className="card slide-up" style={{ padding: '20px', borderColor: 'var(--b2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+            <h4 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.70rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+              {adding ? `Nouveau ${config.name}` : `Modifier ${config.name}`}
             </h4>
-            <button
-              onClick={handleCancel}
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-            >
-              <X className="w-6 h-6" />
+            <button onClick={cancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx3)' }}>
+              <X size={16} />
             </button>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            {currentConfig.fields.map(field => (
-              <div key={field.key}>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  {field.label} {field.required && <span className="text-red-500">*</span>}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
+            {config.fields.map(f => (
+              <div key={f.key}>
+                <label style={{ display: 'block', fontFamily: 'var(--f-disp)', fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)', marginBottom: 5 }}>
+                  {f.label}{f.required && <span style={{ color: 'var(--loss)', marginLeft: 3 }}>*</span>}
                 </label>
-                {renderField(field)}
+                {f.type === 'select' ? (
+                  <select value={form[f.key] || ''} onChange={e => set(f.key, e.target.value)}
+                    className="field select" style={{ padding: '8px 12px', fontSize: '0.75rem', width: '100%' }}>
+                    <option value="">Sélectionner…</option>
+                    {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input type={f.type} value={form[f.key] ?? ''} step={f.step}
+                    onChange={e => set(f.key, e.target.value)}
+                    className="field" style={{ padding: '8px 12px', fontSize: '0.75rem' }} />
+                )}
               </div>
             ))}
           </div>
-          
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-600">
-            <button
-              onClick={handleCancel}
-              disabled={loading}
-              className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-primary-600 dark:bg-primary-500 text-white rounded-lg hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-50 transition-colors shadow-md"
-            >
-              {loading ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              Save
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 14, borderTop: '1px solid var(--b1)' }}>
+            <button onClick={cancel} disabled={saving} className="btn btn-ghost btn-sm">Annuler</button>
+            <button onClick={save} disabled={saving} className="btn btn-primary btn-sm">
+              {saving
+                ? <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                : <Save size={12} />}
+              Enregistrer
             </button>
           </div>
         </div>
       )}
 
-      {/* Instruments List */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-600 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-t-xl">
-          <h4 className="text-xl font-bold text-gray-900 dark:text-white">{currentConfig.name} List</h4>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">All active {currentConfig.name.toLowerCase()} in the system</p>
+      {/* Instruments table */}
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Briefcase size={13} style={{ color: CONFIGS[selectedType].badgeClass === 'badge-eb' ? 'var(--eb)' : CONFIGS[selectedType].badgeClass === 'badge-cln' ? 'var(--cln)' : 'var(--egp)' }} />
+          <h4 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+            {config.name}
+          </h4>
+          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: 'var(--tx3)', padding: '2px 7px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)' }}>
+            {list.length}
+          </span>
         </div>
-        
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-            <thead className="bg-gray-50 dark:bg-gray-700">
-              <tr>
-                {currentConfig.fields.slice(0, 4).map(field => (
-                  <th key={field.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    {field.label}
-                  </th>
-                ))}
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-600">
-              {currentInstruments.map((instrument, index) => (
-                <tr key={index} className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                  index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-25 dark:bg-gray-750'
-                }`}>
-                  {currentConfig.fields.slice(0, 4).map(field => (
-                    <td key={field.key} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                      {field.type === 'date' ? formatDate(instrument[field.key]) : 
-                       field.type === 'number' ? (field.key.includes('coupon') || field.key.includes('yield') || field.key.includes('premium') ? 
-                         `${instrument[field.key]}%` : instrument[field.key]) :
-                       instrument[field.key] || '-'}
-                    </td>
+
+        {list.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--tx3)' }}>
+            <Briefcase size={26} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+            <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.75rem' }}>Aucun {config.name.toLowerCase()} enregistré</p>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  {config.fields.slice(0, 4).map(f => (
+                    <th key={f.key} style={{ textAlign: f.type === 'number' ? 'right' : 'left', cursor: 'default' }}>
+                      {f.label}
+                    </th>
                   ))}
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => handleEdit(instrument)}
-                        className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 p-1 rounded hover:bg-primary-50 dark:hover:bg-primary-900/30"
-                        title="Edit"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(instrument)}
-                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                  <th style={{ textAlign: 'center', cursor: 'default' }}>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        
-        {currentInstruments.length === 0 && (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            <Briefcase className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p className="text-lg">No {currentConfig.name.toLowerCase()} found</p>
+              </thead>
+              <tbody>
+                {list.map((item, idx) => (
+                  <tr key={idx}
+                    style={{ background: idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--tr-hover-bg)'}
+                    onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent'}>
+                    {config.fields.slice(0, 4).map(f => (
+                      <td key={f.key} style={{ textAlign: f.type === 'number' ? 'right' : 'left', fontFamily: f.type === 'number' ? 'var(--f-mono)' : 'var(--f-body)', fontSize: '0.72rem' }}>
+                        {f.type === 'date' ? fDate(item[f.key]) :
+                         f.type === 'number' ? (item[f.key] != null ? `${parseFloat(item[f.key]).toFixed(f.step?.includes('0.0') ? 3 : 0)}${f.key.includes('coupon') || f.key.includes('yield') || f.key.includes('premium') ? '%' : f.key.includes('spread') ? 'bp' : ''}` : '—') :
+                         item[f.key] || '—'}
+                      </td>
+                    ))}
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                        <button onClick={() => openEdit(item)} title="Modifier"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--cyan)', padding: 5, borderRadius: 6 }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,202,255,0.10)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                          <Edit size={13} />
+                        </button>
+                        <button onClick={() => del(item)} title="Supprimer"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx3)', padding: 5, borderRadius: 6 }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,43,96,0.10)'; e.currentTarget.style.color = 'var(--loss)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--tx3)'; }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

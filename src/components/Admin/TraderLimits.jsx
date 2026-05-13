@@ -1,281 +1,220 @@
 // src/components/Admin/TraderLimits.jsx
 import React, { useState } from 'react';
 import { useAdmin } from '../../contexts/AdminContext';
-import { Edit, Save, X, User, AlertTriangle } from 'lucide-react';
-import { formatCurrency, formatPercentage } from '../../utils/formatters';
+import { Edit, Save, X, User, AlertTriangle, Shield } from 'lucide-react';
+
+/* ─── Semi-circle gauge (same math as PortfolioView) ─────────────── */
+const ARC_R = 34;
+const ARC_TOTAL = Math.PI * ARC_R;
+
+const ArcGauge = ({ used, limit, color }) => {
+  const pct   = limit > 0 ? Math.min(used / limit, 1.0) : 0;
+  const over  = limit > 0 && used > limit;
+  const stroke = over ? 'var(--loss)' : color;
+  const fill  = pct * ARC_TOTAL;
+  return (
+    <svg viewBox="0 0 100 56" style={{ width: 80, flexShrink: 0 }}>
+      <path d="M 16,50 A 34,34 0 0,1 84,50" fill="none" stroke="var(--b1)" strokeWidth="7" strokeLinecap="round" />
+      <path d="M 16,50 A 34,34 0 0,1 84,50" fill="none" stroke={stroke} strokeWidth="7" strokeLinecap="round"
+        strokeDasharray={`${fill.toFixed(2)} ${ARC_TOTAL.toFixed(2)}`}
+        style={{ transition: 'stroke-dasharray 0.8s cubic-bezier(0.34,1.56,0.64,1)' }}
+      />
+      <text x="50" y="37" textAnchor="middle" fill={stroke} fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="600">
+        {limit > 0 ? `${Math.round(pct * 100)}%` : '—'}
+      </text>
+    </svg>
+  );
+};
+
+/* ─── Format helpers ─────────────────────────────────────────────── */
+const fCcy = (v, ccy) => {
+  if (!v && v !== 0) return '—';
+  const n = parseFloat(v);
+  const a = Math.abs(n);
+  const s = n < 0 ? '−' : '';
+  if (a >= 1e6) return `${s}${(a / 1e6).toFixed(1)}M ${ccy}`;
+  if (a >= 1e3) return `${s}${(a / 1e3).toFixed(0)}k ${ccy}`;
+  return `${s}${a.toFixed(0)} ${ccy}`;
+};
+
+const INSTRUMENTS = [
+  { key: 'eurobonds', label: 'EuroBonds',  ccy: 'EUR', color: 'var(--eb)'  },
+  { key: 'cln_moroc', label: 'CLN Maroc',  ccy: 'USD', color: 'var(--cln)' },
+  { key: 'cln_gcc',   label: 'CLN GCC',    ccy: 'USD', color: 'var(--cln)' },
+  { key: 'egp',       label: 'EGP Bills',  ccy: 'USD', color: 'var(--egp)' },
+];
+
+const DEFAULT_LIMITS = {
+  eurobonds: { limit: 280000000, currency: 'EUR', used: 0 },
+  cln_moroc: { limit: 50000000,  currency: 'USD', used: 0 },
+  cln_gcc:   { limit: 50000000,  currency: 'USD', used: 0 },
+  egp:       { limit: 20000000,  currency: 'USD', used: 0 },
+};
 
 const TraderLimits = () => {
   const { traders, updateTraderLimits } = useAdmin();
   const [editing, setEditing] = useState(null);
-  const [formData, setFormData] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [form,    setForm]    = useState({});
+  const [saving,  setSaving]  = useState(false);
 
-  const defaultLimits = {
-    eurobonds: { limit: 0, currency: 'EUR', used: 0 },
-    cln_moroc: { limit: 0, currency: 'USD', used: 0 },
-    cln_gcc: { limit: 0, currency: 'USD', used: 0 },
-    egp: { limit: 0, currency: 'USD', used: 0 }
+  const openEdit = (t) => {
+    setEditing(t.id);
+    setForm(JSON.parse(JSON.stringify(t.limits || DEFAULT_LIMITS)));
+  };
+  const cancel = () => { setEditing(null); setForm({}); };
+
+  const setLimitField = (inst, field, value) => setForm(prev => ({
+    ...prev,
+    [inst]: { ...prev[inst], [field]: parseFloat(value) || 0 },
+  }));
+
+  const save = async () => {
+    setSaving(true);
+    try { await updateTraderLimits(editing, form); cancel(); }
+    finally { setSaving(false); }
   };
 
-  const handleEdit = (trader) => {
-    setEditing(trader.id);
-    setFormData(trader.limits || defaultLimits);
-  };
-
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-      await updateTraderLimits(editing, formData);
-      setEditing(null);
-      setFormData({});
-    } catch (error) {
-      console.error('Error updating limits:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditing(null);
-    setFormData({});
-  };
-
-  const handleLimitChange = (instrument, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [instrument]: {
-        ...prev[instrument],
-        [field]: parseFloat(value) || 0
-      }
-    }));
-  };
-
-  const getUsagePercentage = (used, limit) => {
-    if (!limit || limit === 0) return 0;
-    return (used / limit) * 100;
-  };
-
-  const getUsageColor = (percentage) => {
-    if (percentage >= 90) return 'text-red-600 bg-red-100 dark:bg-red-900/40 dark:text-red-300';
-    if (percentage >= 75) return 'text-amber-600 bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300';
-    return 'text-green-600 bg-green-100 dark:bg-green-900/40 dark:text-green-300';
-  };
-
-  const getUsageIcon = (percentage) => {
-    if (percentage >= 90) return <AlertTriangle className="w-4 h-4 text-red-500 dark:text-red-400" />;
-    return null;
-  };
+  const pct = (used, limit) => limit > 0 ? Math.min((used / limit) * 100, 110) : 0;
+  const pctColor = (p) => p >= 95 ? 'var(--loss)' : p >= 75 ? 'var(--warn)' : 'var(--profit)';
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-        <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Trading Limits Management</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Monitor and manage trading limits across all instruments</p>
+      <div>
+        <h3 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.80rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+          Limites Réglementaires
+        </h3>
+        <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.68rem', color: 'var(--tx3)', marginTop: 3 }}>
+          Définissez les plafonds d'exposition par trader et par classe d'actifs
+        </p>
       </div>
 
-      {/* Limits Overview */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-600 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-t-xl">
-          <h4 className="text-xl font-bold text-gray-900 dark:text-white">Trading Limits Overview</h4>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Current usage and limits for all traders</p>
+      {/* Traders cards */}
+      {traders.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px', color: 'var(--tx3)' }}>
+          <Shield size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+          <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.78rem' }}>Aucun trader enregistré</p>
         </div>
-        
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-            <thead className="bg-gray-50 dark:bg-gray-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  Trader
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  EuroBonds (EUR)
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  CLN MOROC (USD)
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  CLN GCC (USD)
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  EGP (USD)
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-600">
-              {traders.map((trader, index) => {
-                const limits = trader.limits || defaultLimits;
+      ) : (
+        traders.map(t => {
+          const limits = t.limits || DEFAULT_LIMITS;
+          const isEditing = editing === t.id;
+          const editLimits = isEditing ? form : limits;
+          const traderName = t.firstName ? `${t.firstName} ${t.lastName || ''}` : t.name || t.username;
 
-                return (
-                  <tr key={trader.id} className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                    index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-25 dark:bg-gray-750'
-                  }`}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <User className="w-5 h-5 text-primary-500 dark:text-primary-400 mr-3" />
-                        <div>
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            {trader.firstName} {trader.lastName}
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{trader.department}</div>
-                        </div>
-                      </div>
-                    </td>
-
-                    {Object.entries(limits).map(([instrument, data]) => {
-                      const percentage = getUsagePercentage(data.used, data.limit);
-
-                      return (
-                        <td key={instrument} className="px-6 py-4 whitespace-nowrap text-center">
-                          <div className="text-xs">
-                            <div className={`flex items-center justify-center gap-1 font-medium px-2 py-1 rounded ${getUsageColor(percentage)}`}>
-                              {getUsageIcon(percentage)}
-                              {formatCurrency(data.used, data.currency)}
-                            </div>
-                            <div className="text-gray-400 dark:text-gray-500 mt-1">
-                              / {formatCurrency(data.limit, data.currency)}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {formatPercentage(percentage, 1)}
-                            </div>
-                          </div>
-                        </td>
-                      );
-                    })}
-
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <button
-                        onClick={() => handleEdit(trader)}
-                        className="text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300 p-1 rounded hover:bg-primary-50 dark:hover:bg-primary-900/30"
-                        title="Edit limits"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {traders.length === 0 && (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            <User className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p className="text-lg">No traders found</p>
-          </div>
-        )}
-      </div>
-
-      {/* Edit Limits Modal */}
-      {editing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200 dark:border-gray-700">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Edit Trading Limits - {traders.find(t => t.id === editing)?.firstName} {traders.find(t => t.id === editing)?.lastName}
-              </h2>
-              <button
-                onClick={handleCancel}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {Object.entries(formData).map(([instrument, data]) => (
-                <div key={instrument} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 shadow-sm">
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-                    {instrument.toUpperCase().replace('_', ' ')}
-                  </h3>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Limit ({data.currency})
-                      </label>
-                      <input
-                        type="number"
-                        value={data.limit}
-                        onChange={(e) => handleLimitChange(instrument, 'limit', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                        placeholder="0"
-                      />
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        {formatCurrency(data.limit, data.currency)}
-                      </div>
+          return (
+            <div key={t.id} className="card" style={{ overflow: 'hidden' }}>
+              {/* Trader header */}
+              <div style={{
+                padding: '12px 16px', borderBottom: '1px solid var(--b1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                background: 'var(--surf)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: 'linear-gradient(135deg, rgba(0,202,255,0.15), rgba(30,127,255,0.25))',
+                    border: '1px solid var(--b2)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.80rem', color: 'var(--cyan)',
+                  }}>
+                    {(traderName[0] || '?').toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: 'var(--f-body)', fontWeight: 500, fontSize: '0.75rem', color: 'var(--tx1)' }}>
+                      {traderName}
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Used ({data.currency})
-                      </label>
-                      <input
-                        type="number"
-                        value={data.used}
-                        onChange={(e) => handleLimitChange(instrument, 'used', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                        placeholder="0"
-                      />
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        {formatCurrency(data.used, data.currency)}
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded border border-gray-200 dark:border-gray-600">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600 dark:text-gray-300">Usage:</span>
-                        <div className={`font-medium px-2 py-1 rounded ${getUsageColor(getUsagePercentage(data.used, data.limit))}`}>
-                          {formatPercentage(getUsagePercentage(data.used, data.limit), 1)}
-                        </div>
-                      </div>
-                      <div className="mt-2">
-                        <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full transition-all ${
-                              getUsagePercentage(data.used, data.limit) >= 90
-                                ? 'bg-red-500'
-                                : getUsagePercentage(data.used, data.limit) >= 75
-                                ? 'bg-amber-500'
-                                : 'bg-green-500'
-                            }`}
-                            style={{ width: `${Math.min(getUsagePercentage(data.used, data.limit), 100)}%` }}
-                          />
-                        </div>
-                      </div>
+                    <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', color: 'var(--tx3)' }}>
+                      {(t.department || t.team || '').replace(/_/g, ' ')}
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200 dark:border-gray-600">
-              <button
-                onClick={handleCancel}
-                disabled={loading}
-                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={loading}
-                className="px-4 py-2 bg-primary-600 dark:bg-primary-500 text-white rounded-md hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-50 flex items-center gap-2"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                {isEditing ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={cancel} className="btn btn-ghost btn-sm"><X size={12} />Annuler</button>
+                    <button onClick={save} disabled={saving} className="btn btn-primary btn-sm">
+                      {saving
+                        ? <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                        : <Save size={12} />}
+                      Sauvegarder
+                    </button>
+                  </div>
                 ) : (
-                  <Save className="w-4 h-4" />
+                  <button onClick={() => openEdit(t)} className="btn btn-ghost btn-sm">
+                    <Edit size={12} />Modifier limites
+                  </button>
                 )}
-                Save
-              </button>
+              </div>
+
+              {/* Instruments grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0 }}>
+                {INSTRUMENTS.map((inst, i) => {
+                  const d = editLimits[inst.key] || { limit: 0, currency: inst.ccy, used: 0 };
+                  const p = pct(d.used, d.limit);
+                  const over = p > 100;
+                  return (
+                    <div key={inst.key} style={{
+                      padding: '14px 16px',
+                      borderRight: i < 3 ? '1px solid var(--b1)' : 'none',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: 2, background: inst.color, flexShrink: 0 }} />
+                        <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.60rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tx3)' }}>
+                          {inst.label}
+                        </span>
+                        {over && <AlertTriangle size={11} style={{ color: 'var(--loss)', marginLeft: 'auto' }} />}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <ArcGauge used={d.used} limit={d.limit} color={inst.color} />
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ marginBottom: 6 }}>
+                            <div className="lbl" style={{ marginBottom: 3 }}>Utilisé</div>
+                            {isEditing ? (
+                              <input type="number" value={d.used} onChange={e => setLimitField(inst.key, 'used', e.target.value)}
+                                className="field" style={{ padding: '5px 8px', fontSize: '0.72rem', marginBottom: 0 }} />
+                            ) : (
+                              <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.72rem', color: pctColor(p), fontWeight: 600 }}>
+                                {fCcy(d.used, d.currency)}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="lbl" style={{ marginBottom: 3 }}>Limite</div>
+                            {isEditing ? (
+                              <input type="number" value={d.limit} onChange={e => setLimitField(inst.key, 'limit', e.target.value)}
+                                className="field" style={{ padding: '5px 8px', fontSize: '0.72rem' }} />
+                            ) : (
+                              <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.72rem', color: 'var(--tx2)', fontWeight: 500 }}>
+                                {fCcy(d.limit, d.currency)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Progress track */}
+                      <div style={{ marginTop: 10 }}>
+                        <div className="progress-track">
+                          <div className="progress-fill" style={{
+                            width: `${Math.min(p, 100)}%`,
+                            background: pctColor(p),
+                          }} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.58rem', color: 'var(--tx3)' }}>0%</span>
+                          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', fontWeight: 600, color: pctColor(p) }}>{p.toFixed(1)}%</span>
+                          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.58rem', color: 'var(--tx3)' }}>100%</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        })
       )}
     </div>
   );

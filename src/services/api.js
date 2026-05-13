@@ -70,7 +70,7 @@ const api = {
     getEgp: (date = today()) =>
       apiClient.get('/api/external/egp', { params: { date } }),
     getTotals: (date = today()) =>
-      apiClient.get('/api/external/totals', { params: { date } }),
+      apiClient.get('/api/external/all', { params: { date } }),
   },
   trades: {
     // GET /api/trades?isin=...&way=BUY&subAsset=Mor+Bond
@@ -112,6 +112,28 @@ const api = {
     // Used for the historical P&L line chart in PortfolioView
     getHistory: (from, to) =>
       apiClient.get('/api/pnl-daily', { params: { from, to } }),
+  },
+  admin: {
+    // GET /api/admin/traders → List<TraderDto>
+    getTraders:  ()         => apiClient.get('/api/admin/traders'),
+    // POST /api/admin/traders → TraderDto
+    createTrader: (dto)     => apiClient.post('/api/admin/traders', dto),
+    // PUT /api/admin/traders/{id}
+    updateTrader: (id, dto) => apiClient.put(`/api/admin/traders/${id}`, dto),
+    // DELETE /api/admin/traders/{id}
+    deleteTrader: (id)      => apiClient.delete(`/api/admin/traders/${id}`),
+    // PUT /api/admin/traders/{id}/limits
+    updateLimits: (id, dto) => apiClient.put(`/api/admin/traders/${id}/limits`, dto),
+    // GET /api/admin/instruments/{type} → List
+    getInstruments: (type)  => apiClient.get(`/api/admin/instruments/${type}`),
+  },
+  auth: {
+    // POST /api/auth/login → { token, user }
+    login:  (dto)  => apiClient.post('/api/auth/login', dto),
+    // POST /api/auth/logout
+    logout: ()     => apiClient.post('/api/auth/logout'),
+    // GET /api/auth/me → UserDto
+    me:     ()     => apiClient.get('/api/auth/me'),
   },
   health: () => apiClient.get('/actuator/health'),
 };

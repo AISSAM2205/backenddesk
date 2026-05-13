@@ -128,10 +128,10 @@ const Row = ({ r, idx }) => {
   const td = { padding: '6px 10px', borderBottom: '1px solid var(--b0)', whiteSpace: 'nowrap', transition: 'background 0.1s' };
   const nb = { ...td, textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums' };
 
-  const rowBg = isAlert ? 'rgba(255,43,96,0.05)' : idx % 2 === 0 ? 'rgba(8,24,41,0.5)' : 'transparent';
+  const rowBg = isAlert ? 'rgba(255,43,96,0.05)' : idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent';
 
   return (
-    <tr className={flash} style={{ background: rowBg }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(12,31,58,0.7)'} onMouseLeave={e => e.currentTarget.style.background = rowBg}>
+    <tr className={flash} style={{ background: rowBg }} onMouseEnter={e => e.currentTarget.style.background = 'var(--tr-hover-bg)'} onMouseLeave={e => e.currentTarget.style.background = rowBg}>
       <td style={{ ...td, fontFamily: 'var(--f-mono)', fontSize: '0.67rem', color: 'var(--cyan)', fontWeight: 500 }}>{r.isin}</td>
       <td style={{ ...td, fontFamily: 'var(--f-body)', fontSize: '0.70rem', color: 'var(--tx1)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.description}>{r.description || '—'}</td>
       <td style={{ ...td, textAlign: 'center' }}><SubBadge v={r.subAsset} /></td>
@@ -220,12 +220,33 @@ const EuroBondView = () => {
   };
 
   const exportCsv = () => {
-    const headers = COLS.map(c => c.label).join(';');
-    const rows = sorted.map(r => COLS.map(c => r[c.key] ?? '').join(';')).join('\n');
-    const blob = new Blob([`${headers}\n${rows}`], { type: 'text/csv;charset=utf-8' });
+    const BOM = '﻿'; // UTF-8 BOM — required for Excel to handle accented chars correctly
+    const TEXT_KEYS = new Set(['isin', 'description', 'subAsset', 'maturityDate', 'currency', 'decision', 'hedgeFuture']);
+    const esc = v => {
+      const s = String(v ?? '');
+      return (s.includes(';') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = COLS.map(c => esc(c.label)).join(';');
+    const csvRows = sorted.map(r =>
+      COLS.map(c => {
+        const v = r[c.key];
+        if (v == null || v === '') return '';
+        if (!TEXT_KEYS.has(c.key)) {
+          const n = parseFloat(v);
+          if (!isNaN(n)) return String(n);
+        }
+        return esc(String(v));
+      }).join(';')
+    ).join('\n');
+    const blob = new Blob([`${BOM}${headers}\n${csvRows}`], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `eurobonds_${selectedDate}.csv`;
-    a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eurobonds_${selectedDate}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -301,7 +322,7 @@ const EuroBondView = () => {
         <table className="dtable">
           {/* Group headers */}
           <thead>
-            <tr style={{ background: '#040C19' }}>
+            <tr style={{ background: 'var(--grphdr-bg)' }}>
               {GROUPS.map((g, i) => (
                 <th key={i} colSpan={g.span} style={{
                   padding: '5px 10px', textAlign: 'center',
@@ -310,7 +331,7 @@ const EuroBondView = () => {
                   fontFamily: 'var(--f-disp)', fontSize: '0.55rem', fontWeight: 800,
                   letterSpacing: '0.12em', textTransform: 'uppercase',
                   color: g.color,
-                  background: '#040C19',
+                  background: 'var(--grphdr-bg)',
                   cursor: 'default',
                 }}>
                   {g.label}

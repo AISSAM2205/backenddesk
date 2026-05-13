@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { useTrading } from '../../../contexts/TradingContext';
+import { useAuth } from '../../../contexts/AuthContext';
 import {
   TrendingUp, TrendingDown, Activity, AlertTriangle,
   RefreshCw, WifiOff, ChevronDown, ChevronUp,
@@ -54,8 +55,8 @@ const useFlash = (value) => {
 };
 
 /* ─── KPI Card ───────────────────────────────────────────────────── */
-const KpiCard = ({ label, value, sub, topClass, valueColor, valueClass = '', icon: Icon }) => (
-  <div className={`card ${topClass}`} style={{ flex: '1 1 160px', padding: '14px 16px', position: 'relative', overflow: 'hidden' }}>
+const KpiCard = ({ label, value, sub, topClass, valueColor, valueClass = '', icon: Icon, animClass = '' }) => (
+  <div className={`card ${topClass} ${animClass}`} style={{ flex: '1 1 160px', padding: '14px 16px', position: 'relative', overflow: 'hidden' }}>
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
       <span className="lbl">{label}</span>
       {Icon && <Icon size={14} style={{ color: valueColor, opacity: 0.7, flexShrink: 0 }} />}
@@ -328,6 +329,7 @@ const PortfolioView = () => {
     pnlDailyHistory,
     connectionStatus, loading, refresh, selectedDate, lastUpdate,
   } = useTrading();
+  const { user } = useAuth();
 
   const [showAll, setShowAll] = useState(false);
 
@@ -365,9 +367,35 @@ const PortfolioView = () => {
 
   const donutTotal = donutSegs.reduce((s, x) => s + x.value, 0);
 
-  /* Limit gauge */
+  /* Regulatory limit — set by admin, stored in localStorage per trader, reactive to admin changes */
+  const [limitEur, setLimitEur] = useState(() => {
+    try {
+      const stored = localStorage.getItem(`trader_limits_${user?.id}`);
+      if (stored) {
+        const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
+        if (!isNaN(val) && val > 0) return val;
+      }
+    } catch { /* ignore */ }
+    return 280e6;
+  });
+
+  useEffect(() => {
+    const readLimit = () => {
+      try {
+        const stored = localStorage.getItem(`trader_limits_${user?.id}`);
+        if (stored) {
+          const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
+          if (!isNaN(val) && val > 0) { setLimitEur(val); return; }
+        }
+      } catch { /* ignore */ }
+      setLimitEur(280e6);
+    };
+    const onUpdate = (e) => { if (!e.detail || e.detail.traderId === user?.id) readLimit(); };
+    window.addEventListener('traderLimitsUpdated', onUpdate);
+    return () => window.removeEventListener('traderLimitsUpdated', onUpdate);
+  }, [user?.id]);
+
   const exposureEur  = nomUsd * 0.92;
-  const limitEur     = 280e6;
   const limitPct     = Math.min((exposureEur / limitEur) * 100, 110);
   const limitOver    = limitPct > 100;
 
@@ -427,6 +455,7 @@ const PortfolioView = () => {
               valueColor={pnlPos ? 'var(--profit)' : 'var(--loss)'}
               valueClass={pnlPos ? 'glow-profit' : 'glow-loss'}
               icon={pnlPos ? TrendingUp : TrendingDown}
+              animClass="slide-up stagger-1"
             />
             <KpiCard
               label="P&L Comptable"
@@ -435,6 +464,7 @@ const PortfolioView = () => {
               topClass={pnlAcct >= 0 ? 'kpi-top-green' : 'kpi-top-red'}
               valueColor={pnlAcct >= 0 ? 'var(--profit)' : 'var(--loss)'}
               icon={Activity}
+              animClass="slide-up stagger-2"
             />
             <KpiCard
               label="Net Daily (Carry)"
@@ -443,6 +473,7 @@ const PortfolioView = () => {
               topClass={netDaily >= 0 ? 'kpi-top-cyan' : 'kpi-top-red'}
               valueColor={netDaily >= 0 ? 'var(--cyan)' : 'var(--loss)'}
               icon={Activity}
+              animClass="slide-up stagger-3"
             />
             <KpiCard
               label="Nominal Total (USD)"
@@ -450,6 +481,7 @@ const PortfolioView = () => {
               sub={`${eurobonds.length} obligations`}
               topClass="kpi-top-blue"
               valueColor="var(--tx1)"
+              animClass="slide-up stagger-4"
             />
             <KpiCard
               label="Duration Modifiée"
@@ -457,6 +489,7 @@ const PortfolioView = () => {
               sub="Nominal-weighted"
               topClass="kpi-top-violet"
               valueColor="#C084FC"
+              animClass="slide-up stagger-5"
             />
             <KpiCard
               label="DV01 Portfolio"
@@ -464,6 +497,7 @@ const PortfolioView = () => {
               sub="Sensibilité 1bp"
               topClass="kpi-top-blue"
               valueColor="#60A5FA"
+              animClass="slide-up stagger-6"
             />
           </div>
 
@@ -497,7 +531,7 @@ const PortfolioView = () => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
 
             {/* Donut allocation */}
-            <div className="card" style={{ padding: '16px' }}>
+            <div className="card slide-up stagger-3" style={{ padding: '16px' }}>
               <p className="sect-ttl" style={{ marginBottom: 14 }}>Répartition de l'Exposition</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div style={{ width: 120, height: 120, flexShrink: 0 }}>
@@ -528,7 +562,7 @@ const PortfolioView = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <span className="lbl">Limite Réglementaire</span>
                   <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: limitOver ? 'var(--loss)' : 'var(--profit)', fontWeight: 600 }}>
-                    {fUSD(exposureEur / 1e6)}M / 280M EUR
+                    {fUSD(exposureEur / 1e6)}M / {fUSD(limitEur / 1e6)}M EUR
                   </span>
                 </div>
                 <div className="progress-track">
@@ -541,7 +575,7 @@ const PortfolioView = () => {
             </div>
 
             {/* P&L Decomposition */}
-            <div className="card" style={{ padding: '16px' }}>
+            <div className="card slide-up stagger-4" style={{ padding: '16px' }}>
               <p className="sect-ttl" style={{ marginBottom: 14 }}>Décomposition P&L (MAD)</p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {[
@@ -571,50 +605,75 @@ const PortfolioView = () => {
               </div>
             </div>
 
-            {/* Risk Metrics */}
-            <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <p className="sect-ttl">Métriques de Risque</p>
+            {/* Risk Metrics — Arc Gauges */}
+            <div className="card slide-up stagger-5" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span className="lbl">Duration Modifiée</span>
-                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.78rem', color: '#C084FC', fontWeight: 600 }}>
-                    {dur != null ? `${fN(dur, 4)} ans` : '—'}
-                  </span>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <p className="sect-ttl">Métriques de Risque</p>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.55rem', color: 'var(--tx3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  Util. / Limite
+                </span>
+              </div>
+
+              {/* 3 gauge tiles */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+
+                <div style={{ background: 'var(--surf)', border: '1px solid var(--b1)', borderRadius: 10, padding: '10px 6px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#C084FC', boxShadow: '0 0 7px #C084FC', marginBottom: 4 }} />
+                  <ArcGauge
+                    value={parseFloat(dur || 0)}
+                    max={12}
+                    color="#C084FC"
+                    label="Duration"
+                    valueStr={dur != null ? `${fN(dur, 2)}y` : '—'}
+                  />
                 </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${Math.min((parseFloat(dur || 0) / 12) * 100, 100)}%`, background: '#9B3EEF' }} />
+
+                <div style={{ background: 'var(--surf)', border: '1px solid var(--b1)', borderRadius: 10, padding: '10px 6px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#60A5FA', boxShadow: '0 0 7px #60A5FA', marginBottom: 4 }} />
+                  <ArcGauge
+                    value={dv01}
+                    max={50000}
+                    color="#60A5FA"
+                    label="DV01 k$"
+                    valueStr={`${fN(dv01 / 1000, 1)}k`}
+                  />
+                </div>
+
+                <div style={{
+                  background: 'var(--surf)',
+                  border: `1px solid ${limitOver ? 'rgba(255,43,96,0.30)' : 'var(--b1)'}`,
+                  borderRadius: 10, padding: '10px 6px 6px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                }}>
+                  <div style={{
+                    width: 5, height: 5, borderRadius: '50%',
+                    background: limitOver ? 'var(--loss)' : 'var(--profit)',
+                    boxShadow: limitOver ? '0 0 7px var(--loss)' : '0 0 7px var(--profit)',
+                    marginBottom: 4,
+                  }} />
+                  <ArcGauge
+                    value={exposureEur}
+                    max={limitEur}
+                    color={limitOver ? 'var(--loss)' : 'var(--profit)'}
+                    label="Expo / Lim."
+                    valueStr={`${Math.round(limitPct)}%`}
+                  />
                 </div>
               </div>
 
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span className="lbl">DV01 Total</span>
-                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.78rem', color: '#60A5FA', fontWeight: 600 }}>
-                    {fN(dv01, 0)} USD/bp
-                  </span>
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: '62%', background: 'var(--eb)' }} />
-                </div>
-              </div>
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span className="lbl">Alertes Carry</span>
-                  <span style={{
-                    fontFamily: 'var(--f-mono)', fontSize: '0.78rem', fontWeight: 600,
-                    color: alerts.length > 0 ? 'var(--loss)' : 'var(--profit)',
-                  }}>
-                    {alerts.length > 0 ? `⚠ ${alerts.length} position${alerts.length > 1 ? 's' : ''}` : '✓ Tout OK'}
-                  </span>
-                </div>
-                {alerts.length > 0 && (
-                  <div style={{ fontSize: '0.67rem', color: '#FC8FA0', fontFamily: 'var(--f-body)', lineHeight: 1.5 }}>
-                    {alerts.slice(0, 3).map(a => a.description || a.isin).join(' · ')}
-                    {alerts.length > 3 && ` +${alerts.length - 3} autres`}
-                  </div>
-                )}
+              {/* Carry alerts */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px', borderRadius: 8,
+                background: alerts.length > 0 ? 'rgba(255,43,96,0.06)' : 'rgba(0,232,153,0.05)',
+                border: `1px solid ${alerts.length > 0 ? 'rgba(255,43,96,0.22)' : 'rgba(0,232,153,0.18)'}`,
+              }}>
+                <span className="lbl">Alertes Carry</span>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.72rem', fontWeight: 700, color: alerts.length > 0 ? 'var(--loss)' : 'var(--profit)' }}>
+                  {alerts.length > 0 ? `⚠ ${alerts.length} pos.` : '✓ OK'}
+                </span>
               </div>
             </div>
           </div>

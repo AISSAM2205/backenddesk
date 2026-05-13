@@ -35,6 +35,38 @@ const StatCard = ({ label, value, sub, topClass, valColor, icon: Icon }) => (
   </div>
 );
 
+/* ─── Arc Gauge (semi-circle) ────────────────────────────────────── */
+const ARC_R2     = 32;
+const ARC_TOTAL2 = Math.PI * ARC_R2;
+
+const ArcGauge2 = ({ value, max, color, label, valueStr, sub }) => {
+  const pct    = max > 0 ? Math.min(value / max, 1.0) : 0;
+  const over   = max > 0 && value > max;
+  const stroke = over ? 'var(--loss)' : color;
+  const fill   = pct * ARC_TOTAL2;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <svg viewBox="0 0 100 58" style={{ width: '100%', maxWidth: 120 }}>
+        <path d="M 18,50 A 32,32 0 0,1 82,50"
+          fill="none" stroke="var(--b1)" strokeWidth="8" strokeLinecap="round" />
+        <path d="M 18,50 A 32,32 0 0,1 82,50"
+          fill="none" stroke={stroke} strokeWidth="8" strokeLinecap="round"
+          strokeDasharray={`${fill.toFixed(2)} ${ARC_TOTAL2.toFixed(2)}`}
+          style={{ transition: 'stroke-dasharray 0.9s cubic-bezier(0.34,1.56,0.64,1)' }}
+        />
+        <text x="50" y="36" textAnchor="middle" fill={stroke} fontSize="11"
+          fontFamily="JetBrains Mono,monospace" fontWeight="600">{valueStr}</text>
+        <text x="50" y="48" textAnchor="middle" fill="var(--tx3)" fontSize="7"
+          fontFamily="Syne,sans-serif">{`${(pct * 100).toFixed(0)}%`}</text>
+      </svg>
+      <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.58rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)', textAlign: 'center' }}>
+        {label}
+      </span>
+      {sub && <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.58rem', color: 'var(--tx3)', textAlign: 'center' }}>{sub}</span>}
+    </div>
+  );
+};
+
 /* ─── DV01 Bar ───────────────────────────────────────────────────── */
 const Dv01Bar = ({ value, maxVal }) => {
   const pct = maxVal > 0 ? Math.min(Math.abs(parseFloat(value || 0)) / maxVal * 100, 100) : 0;
@@ -145,6 +177,72 @@ const RiskView = () => {
           <StatCard label="Signaux BUY"          value={buySignals.length > 0 ? `${buySignals.length} signal${buySignals.length > 1 ? 's' : ''}` : '— Aucun'} sub="G-Spread > Target" topClass={buySignals.length ? 'kpi-top-green' : ''} valColor={buySignals.length ? 'var(--profit)' : 'var(--tx2)'} icon={Zap} />
         </div>
 
+        {/* ── Risk Synthesis Panel ── */}
+        <div className="card slide-up stagger-2" style={{ padding: '16px' }}>
+          <p className="sect-ttl" style={{ marginBottom: 14 }}>Synthèse Risque — Vue Graphique</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1px 1fr 1fr 1fr', gap: 0, alignItems: 'center' }}>
+
+            {/* Gauge 1 — Duration vs 10Y limit (meaningful: utilisation vs plafond) */}
+            <ArcGauge2
+              value={dur || 0} max={10}
+              color="#C084FC" label="Duration"
+              valueStr={dur ? `${fN(dur, 2)}y` : '—'}
+              sub="Max 10 ans"
+            />
+
+            {/* Gauge 2 — DV01 vs 80k limit (meaningful: sensibilité vs plafond) */}
+            <ArcGauge2
+              value={totalDv01} max={80000}
+              color="#60A5FA" label="DV01"
+              valueStr={`${fN(totalDv01 / 1000, 1)}k`}
+              sub="Max 80k $/bp"
+            />
+
+            {/* Divider */}
+            <div style={{ height: '80%', background: 'var(--b1)', width: 1, margin: '0 8px' }} />
+
+            {/* Metric — Net Daily P&L (montant MAD, pas un ratio de limite) */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '8px 4px' }}>
+              <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.10rem', lineHeight: 1, letterSpacing: '-0.02em', color: netDaily >= 0 ? 'var(--profit)' : 'var(--loss)' }}>
+                {fMAD(netDaily, true)}
+              </span>
+              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.55rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)' }}>Net Daily</span>
+              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)', textAlign: 'center' }}>Theta + Financement</span>
+            </div>
+
+            {/* Metric — Theta / Coupon carry (accrual quotidien, toujours positif) */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '8px 4px' }}>
+              <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.10rem', lineHeight: 1, letterSpacing: '-0.02em', color: 'var(--cyan)' }}>
+                {fMAD(theta, true)}
+              </span>
+              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.55rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)' }}>Theta / j</span>
+              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)', textAlign: 'center' }}>Accrual coupon</span>
+            </div>
+
+            {/* Metric — Signaux BUY (ratio N/total, pas un % de limite) */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '8px 4px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.40rem', lineHeight: 1, color: buySignals.length > 0 ? 'var(--profit)' : 'var(--tx2)' }}>
+                  {buySignals.length}
+                </span>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.72rem', color: 'var(--tx3)' }}>
+                  /{rows.length}
+                </span>
+              </div>
+              {rows.length > 0 && (
+                <div className="progress-track" style={{ width: 64 }}>
+                  <div className="progress-fill" style={{ width: `${(buySignals.length / rows.length) * 100}%`, background: 'var(--profit)' }} />
+                </div>
+              )}
+              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.55rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: buySignals.length > 0 ? 'var(--profit)' : 'var(--tx3)' }}>
+                Signaux BUY
+              </span>
+              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)' }}>pos. BUY / total</span>
+            </div>
+
+          </div>
+        </div>
+
         {/* ── Carry Alert Banner ── */}
         {alerts.length > 0 && (
           <div style={{
@@ -214,13 +312,13 @@ const RiskView = () => {
                 {displayRows.map((r, idx) => {
                   const isBuy = r.decision === 'BUY';
                   const isAlert = r.netDailyAlert;
-                  const rowBg = isAlert ? 'rgba(255,43,96,0.04)' : idx % 2 === 0 ? 'rgba(8,24,41,0.5)' : 'transparent';
+                  const rowBg = isAlert ? 'rgba(255,43,96,0.04)' : idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent';
                   const spread = parseFloat(r.targetSpread || 0) > 0
                     ? (parseFloat(r.gSpreadBid || 0) - parseFloat(r.targetSpread || 0)).toFixed(1)
                     : null;
                   return (
                     <tr key={r.isin} style={{ background: rowBg }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(12,31,58,0.7)'}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--tr-hover-bg)'}
                       onMouseLeave={e => e.currentTarget.style.background = rowBg}>
                       <td style={{ fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--cyan)', fontWeight: 500 }}>{r.isin}</td>
                       <td style={{ textAlign: 'left', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.70rem', color: 'var(--tx1)' }} title={r.description}>{r.description || '—'}</td>

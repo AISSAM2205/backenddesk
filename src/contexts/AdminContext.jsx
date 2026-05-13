@@ -254,9 +254,17 @@ export const AdminProvider = ({ children }) => {
 
   const updateTraderLimits = async (traderId, limits) => {
     try {
-      console.log('Updating trader limits (mock):', traderId, limits);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await loadAdminData(); // Reload data
+      // Persist to localStorage so PortfolioView can read the trader's limit
+      localStorage.setItem(`trader_limits_${traderId}`, JSON.stringify(limits));
+      window.dispatchEvent(new CustomEvent('traderLimitsUpdated', { detail: { traderId } }));
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Update in-memory mock state
+      dispatch({
+        type: 'SET_TRADERS',
+        payload: state.traders.map(t =>
+          t.id === traderId ? { ...t, limits } : t
+        ),
+      });
     } catch (error) {
       dispatch({ type: 'SET_ERROR', payload: error.message });
       throw error;

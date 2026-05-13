@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Eye, EyeOff, Lock, AlertCircle, User, ArrowRight, Activity, Shield } from 'lucide-react';
 
@@ -13,6 +13,15 @@ const LoginForm = () => {
   const { login, loading, error, clearError, loginAsAdmin, loginAsTrader } = useAuth();
   const [form, setForm] = useState({ username: '', password: '' });
   const [showPwd, setShowPwd] = useState(false);
+
+  useEffect(() => {
+    if (!document.getElementById('__login-spin')) {
+      const s = document.createElement('style');
+      s.id = '__login-spin';
+      s.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+      document.head.appendChild(s);
+    }
+  }, []);
 
   const onChange = (e) => {
     setForm(p => ({ ...p, [e.target.name]: e.target.value }));
@@ -273,10 +282,3 @@ const LoginForm = () => {
 
 export default LoginForm;
 
-/* spin keyframe — local override for the spinner */
-const _style = document.createElement('style');
-_style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-if (typeof document !== 'undefined' && !document.getElementById('__login-spin')) {
-  _style.id = '__login-spin';
-  document.head.appendChild(_style);
-}

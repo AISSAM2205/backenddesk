@@ -1,8 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useTrading } from '../../contexts/TradingContext';
 import {
-  AlertTriangle, RefreshCw, Shield, ChevronUp, ChevronDown,
-  ChevronsUpDown, Activity, TrendingUp, BarChart2, Zap, TrendingDown,
+  AlertTriangle, RefreshCw, Shield, ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react';
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -22,50 +21,15 @@ const fMAD = (v, compact = false) => {
 const pnlColor = (v) => parseFloat(v || 0) >= 0 ? 'var(--profit)' : 'var(--loss)';
 
 /* ─── KPI Card ───────────────────────────────────────────────────── */
-const StatCard = ({ label, value, sub, topClass, valColor, icon: Icon }) => (
-  <div className={`card ${topClass}`} style={{ flex: '1 1 150px', padding: '14px 16px', position: 'relative', overflow: 'hidden' }}>
-    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
-      <span className="lbl">{label}</span>
-      {Icon && <Icon size={14} style={{ color: valColor, opacity: 0.65, flexShrink: 0 }} />}
-    </div>
-    <div className="n" style={{ fontSize: '1.35rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.03em' }}>
+const StatCard = ({ label, value, sub, valColor }) => (
+  <div className="card" style={{ flex: '1 1 140px', padding: '8px 10px', overflow: 'hidden' }}>
+    <span className="lbl" style={{ display: 'block', marginBottom: 5, fontSize: '0.53rem', letterSpacing: '0.12em' }}>{label}</span>
+    <div className="n" style={{ fontSize: '1.22rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.03em' }}>
       {value}
     </div>
-    {sub && <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.67rem', color: 'var(--tx3)', marginTop: 8, lineHeight: 1.4 }}>{sub}</p>}
+    {sub && <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.60rem', color: 'var(--tx3)', marginTop: 5, lineHeight: 1.3 }}>{sub}</p>}
   </div>
 );
-
-/* ─── Arc Gauge (semi-circle) ────────────────────────────────────── */
-const ARC_R2     = 32;
-const ARC_TOTAL2 = Math.PI * ARC_R2;
-
-const ArcGauge2 = ({ value, max, color, label, valueStr, sub }) => {
-  const pct    = max > 0 ? Math.min(value / max, 1.0) : 0;
-  const over   = max > 0 && value > max;
-  const stroke = over ? 'var(--loss)' : color;
-  const fill   = pct * ARC_TOTAL2;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-      <svg viewBox="0 0 100 58" style={{ width: '100%', maxWidth: 120 }}>
-        <path d="M 18,50 A 32,32 0 0,1 82,50"
-          fill="none" stroke="var(--b1)" strokeWidth="8" strokeLinecap="round" />
-        <path d="M 18,50 A 32,32 0 0,1 82,50"
-          fill="none" stroke={stroke} strokeWidth="8" strokeLinecap="round"
-          strokeDasharray={`${fill.toFixed(2)} ${ARC_TOTAL2.toFixed(2)}`}
-          style={{ transition: 'stroke-dasharray 0.9s cubic-bezier(0.34,1.56,0.64,1)' }}
-        />
-        <text x="50" y="36" textAnchor="middle" fill={stroke} fontSize="11"
-          fontFamily="JetBrains Mono,monospace" fontWeight="600">{valueStr}</text>
-        <text x="50" y="48" textAnchor="middle" fill="var(--tx3)" fontSize="7"
-          fontFamily="Syne,sans-serif">{`${(pct * 100).toFixed(0)}%`}</text>
-      </svg>
-      <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.58rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)', textAlign: 'center' }}>
-        {label}
-      </span>
-      {sub && <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.58rem', color: 'var(--tx3)', textAlign: 'center' }}>{sub}</span>}
-    </div>
-  );
-};
 
 /* ─── DV01 Bar ───────────────────────────────────────────────────── */
 const Dv01Bar = ({ value, maxVal }) => {
@@ -82,6 +46,17 @@ const Dv01Bar = ({ value, maxVal }) => {
   );
 };
 
+/* ─── Rate scenario constants ───────────────────────────────────── */
+const RATE_SCENARIOS = [
+  { label: '−100bp', delta: -100 },
+  { label: '−50bp',  delta: -50  },
+  { label: '−25bp',  delta: -25  },
+  { label: '+25bp',  delta: +25  },
+  { label: '+50bp',  delta: +50  },
+  { label: '+100bp', delta: +100 },
+];
+const USD_MAD_REF = 9.251;
+
 /* ─── Sort icon ──────────────────────────────────────────────────── */
 const SortIcon = ({ active, dir }) => {
   if (!active) return <ChevronsUpDown size={10} style={{ opacity: 0.25, marginLeft: 3, flexShrink: 0 }} />;
@@ -94,7 +69,7 @@ const SortIcon = ({ active, dir }) => {
 const RiskView = () => {
   const {
     dashboardRows, riskData, globalDashboard, portfolioDuration,
-    loading, refresh, selectedDate,
+    rates, loading, refresh, selectedDate,
   } = useTrading();
 
   const [sortKey, setSortKey] = useState('dv01Bond');
@@ -124,6 +99,12 @@ const RiskView = () => {
   const totalDv01  = rows.reduce((s, r) => s + parseFloat(r.dv01Bond || 0), 0);
   const maxDv01    = rows.reduce((s, r) => Math.max(s, Math.abs(parseFloat(r.dv01Bond || 0))), 0);
   const dur        = portfolioDuration ?? parseFloat(globalDashboard?.portfolioDuration || 0);
+  // Sum of (convexity × nominal) for convexity-adjusted PnL: ΔP = -DV01×Δbp + 0.5×ΣC×N×(Δbp/10000)²
+  const totalConvexDollar = rows.reduce((s, r) => {
+    const c = parseFloat(r.convexity || 0);
+    const n = parseFloat(r.netNominal || 0);
+    return s + (isNaN(c) || isNaN(n) ? 0 : c * n);
+  }, 0);
   const alerts     = dashboardRows.filter(r => r.netDailyAlert);
   const buySignals = dashboardRows.filter(r => r.decision === 'BUY');
 
@@ -145,101 +126,142 @@ const RiskView = () => {
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--void)' }}>
 
       {/* ── Header ── */}
-      <div style={{
-        position: 'sticky', top: 0, zIndex: 20,
-        background: 'var(--void)', borderBottom: '1px solid var(--b1)',
-        padding: '10px 16px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-      }}>
-        <div>
-          <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-            Pricing & Analytics
-          </h2>
-          <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', marginTop: 2 }}>
-            Carry · DV01 · Duration · Signaux Hedge — {selectedDate}
-          </p>
+      <div className="view-hdr">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ display: 'inline-block', width: 2, height: 13, background: '#9B3EEF', borderRadius: 1 }} />
+              <h2 className="view-title">Pricing &amp; Analytics</h2>
+            </div>
+            <p className="view-sub" style={{ paddingLeft: 9 }}>Carry · DV01 · Duration · Signaux Hedge — {selectedDate}</p>
+          </div>
         </div>
-        <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
-          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          Actualiser
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="tag">{rows.length} positions</span>
+          <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
+            <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            Actualiser
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* ── KPI Row ── */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <StatCard label="Duration Modifiée"    value={dur ? `${fN(dur, 4)} ans` : '—'}     sub="Nominal-weighted"            topClass="kpi-top-violet" valColor="#C084FC" icon={BarChart2}  />
-          <StatCard label="DV01 Total Portfolio" value={`${fN(totalDv01, 0)} $/bp`}           sub="Sensibilité à 1bp"           topClass="kpi-top-blue"   valColor="#60A5FA" icon={Activity}  />
-          <StatCard label="Net Daily"            value={fMAD(netDaily, true)}                 sub="Theta + Financement"         topClass={netDaily >= 0 ? 'kpi-top-green' : 'kpi-top-red'} valColor={pnlColor(netDaily)} icon={Activity} />
-          <StatCard label="Coût Financement/j"   value={fMAD(funding, true)}                  sub="Portage obligataire"         topClass="kpi-top-warn"   valColor="var(--warn)"  icon={TrendingDown} />
-          <StatCard label="Theta Coupon/j"       value={fMAD(theta, true)}                    sub="Accrual quotidien"           topClass="kpi-top-cyan"   valColor="var(--cyan)"  icon={TrendingUp}   />
-          <StatCard label="Signaux BUY"          value={buySignals.length > 0 ? `${buySignals.length} signal${buySignals.length > 1 ? 's' : ''}` : '— Aucun'} sub="G-Spread > Target" topClass={buySignals.length ? 'kpi-top-green' : ''} valColor={buySignals.length ? 'var(--profit)' : 'var(--tx2)'} icon={Zap} />
+          <StatCard label="Duration Modifiée"    value={dur ? `${fN(dur, 4)} ans` : '—'}     sub="Nominal-weighted"   valColor="#C084FC"           />
+          <StatCard label="DV01 Total Portfolio" value={`${fN(totalDv01, 0)} $/bp`}           sub="Sensibilité à 1bp"  valColor="#60A5FA"           />
+          <StatCard label="Net Daily"            value={fMAD(netDaily, true)}                 sub="Theta + Financement" valColor={pnlColor(netDaily)} />
+          <StatCard label="Coût Financement/j"   value={fMAD(funding, true)}                  sub="Portage obligataire" valColor="var(--warn)"       />
+          <StatCard label="Theta Coupon/j"       value={fMAD(theta, true)}                    sub="Accrual quotidien"   valColor="var(--cyan)"       />
+          <StatCard label="Signaux BUY"          value={buySignals.length > 0 ? `${buySignals.length} signal${buySignals.length > 1 ? 's' : ''}` : '— Aucun'} sub="G-Spread > Target" valColor={buySignals.length ? 'var(--profit)' : 'var(--tx2)'} />
         </div>
 
-        {/* ── Risk Synthesis Panel ── */}
-        <div className="card slide-up stagger-2" style={{ padding: '16px' }}>
-          <p className="sect-ttl" style={{ marginBottom: 14 }}>Synthèse Risque — Vue Graphique</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1px 1fr 1fr 1fr', gap: 0, alignItems: 'center' }}>
+        {/* ── Analysis Row: Rate Sensitivity + Carry Attribution ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
 
-            {/* Gauge 1 — Duration vs 10Y limit (meaningful: utilisation vs plafond) */}
-            <ArcGauge2
-              value={dur || 0} max={10}
-              color="#C084FC" label="Duration"
-              valueStr={dur ? `${fN(dur, 2)}y` : '—'}
-              sub="Max 10 ans"
-            />
-
-            {/* Gauge 2 — DV01 vs 80k limit (meaningful: sensibilité vs plafond) */}
-            <ArcGauge2
-              value={totalDv01} max={80000}
-              color="#60A5FA" label="DV01"
-              valueStr={`${fN(totalDv01 / 1000, 1)}k`}
-              sub="Max 80k $/bp"
-            />
-
-            {/* Divider */}
-            <div style={{ height: '80%', background: 'var(--b1)', width: 1, margin: '0 8px' }} />
-
-            {/* Metric — Net Daily P&L (montant MAD, pas un ratio de limite) */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '8px 4px' }}>
-              <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.10rem', lineHeight: 1, letterSpacing: '-0.02em', color: netDaily >= 0 ? 'var(--profit)' : 'var(--loss)' }}>
-                {fMAD(netDaily, true)}
-              </span>
-              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.55rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)' }}>Net Daily</span>
-              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)', textAlign: 'center' }}>Theta + Financement</span>
-            </div>
-
-            {/* Metric — Theta / Coupon carry (accrual quotidien, toujours positif) */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '8px 4px' }}>
-              <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.10rem', lineHeight: 1, letterSpacing: '-0.02em', color: 'var(--cyan)' }}>
-                {fMAD(theta, true)}
-              </span>
-              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.55rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)' }}>Theta / j</span>
-              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)', textAlign: 'center' }}>Accrual coupon</span>
-            </div>
-
-            {/* Metric — Signaux BUY (ratio N/total, pas un % de limite) */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '8px 4px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
-                <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.40rem', lineHeight: 1, color: buySignals.length > 0 ? 'var(--profit)' : 'var(--tx2)' }}>
-                  {buySignals.length}
+          {/* Rate Sensitivity Matrix */}
+          <div className="card slide-up stagger-3" style={{ padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <p className="sect-ttl" style={{ margin: 0 }}>Sensibilité aux Taux</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', color: 'var(--tx3)', padding: '2px 7px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)' }}>
+                  DV01 {fN(totalDv01, 0)} $/bp
                 </span>
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.72rem', color: 'var(--tx3)' }}>
-                  /{rows.length}
-                </span>
+                {totalConvexDollar > 0 && (
+                  <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.55rem', fontWeight: 700, color: '#C084FC', padding: '2px 7px', background: 'rgba(192,132,252,0.08)', borderRadius: 4, border: '1px solid rgba(192,132,252,0.20)' }}>
+                    Convexité adj.
+                  </span>
+                )}
               </div>
-              {rows.length > 0 && (
-                <div className="progress-track" style={{ width: 64 }}>
-                  <div className="progress-fill" style={{ width: `${(buySignals.length / rows.length) * 100}%`, background: 'var(--profit)' }} />
-                </div>
-              )}
-              <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.55rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: buySignals.length > 0 ? 'var(--profit)' : 'var(--tx3)' }}>
-                Signaux BUY
-              </span>
-              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)' }}>pos. BUY / total</span>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
+              {RATE_SCENARIOS.map(({ label, delta }) => {
+                const usdMad    = parseFloat(rates?.usdMad || USD_MAD_REF);
+                const deltaFrac = delta / 10000;                                             // Δy en décimal
+                const pnlUsdLin = -totalDv01 * delta;
+                const convAdj   = 0.5 * totalConvexDollar * deltaFrac * deltaFrac;          // ½·ΣC·N·Δy²
+                const pnlUsdAdj = pnlUsdLin + convAdj;
+                const pnlMadLin = pnlUsdLin * usdMad;
+                const pnlMadAdj = pnlUsdAdj * usdMad;
+                const col       = delta > 0 ? 'var(--loss)' : 'var(--profit)';
+                const diffMad   = pnlMadAdj - pnlMadLin;
+                const absMax    = totalDv01 * 100 * usdMad;
+                const pct       = absMax > 0 ? Math.min(Math.abs(pnlMadAdj) / absMax * 100, 100) : 0;
+                return (
+                  <div key={label} style={{
+                    padding: '10px 6px', borderRadius: 7, textAlign: 'center',
+                    background: delta > 0 ? 'rgba(255,43,96,0.05)' : 'rgba(0,232,153,0.05)',
+                    border: `1px solid ${delta > 0 ? 'rgba(255,43,96,0.14)' : 'rgba(0,232,153,0.14)'}`,
+                  }}>
+                    <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.53rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tx3)', marginBottom: 6 }}>
+                      {label}
+                    </div>
+                    {/* Convexity-adjusted value — main */}
+                    <div style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '0.78rem', lineHeight: 1, color: col, letterSpacing: '-0.01em' }}>
+                      {pnlMadAdj >= 0 ? '+' : ''}{(pnlMadAdj / 1e6).toFixed(2)}
+                    </div>
+                    <div style={{ fontFamily: 'var(--f-disp)', fontSize: '0.48rem', color: 'var(--tx3)', marginTop: 2 }}>M MAD</div>
+                    {/* Convexity delta vs linear */}
+                    {Math.abs(diffMad) > 1000 && (
+                      <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.50rem', color: '#C084FC', marginTop: 3 }}>
+                        conv {diffMad >= 0 ? '+' : ''}{(diffMad / 1e6).toFixed(2)}M
+                      </div>
+                    )}
+                    {/* Linear secondary */}
+                    <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.50rem', color: 'var(--tx3)', marginTop: 2, opacity: 0.6 }}>
+                      lin. {pnlMadLin >= 0 ? '+' : ''}{(pnlMadLin / 1e6).toFixed(2)}M
+                    </div>
+                    <div style={{ height: 3, background: 'var(--b1)', borderRadius: 2, overflow: 'hidden', marginTop: 5 }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 2, opacity: 0.75,
+                        ...(delta > 0 ? {} : { marginLeft: 'auto' }) }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)', marginTop: 8, textAlign: 'right', opacity: 0.6 }}>
+              ΔP ≈ −DV01×Δbp + ½·C·N·(Δbp/10000)² — valeur principale = convexité ajustée
+            </p>
+          </div>
 
+          {/* Carry Attribution */}
+          <div className="card slide-up stagger-3" style={{ padding: '14px 16px' }}>
+            <p className="sect-ttl" style={{ marginBottom: 12 }}>Attribution Carry / j</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                { label: 'Theta Coupon', value: theta,   col: 'var(--cyan)',  sign: true  },
+                { label: 'Financement',  value: funding, col: 'var(--warn)',  sign: false },
+                { label: 'Net Daily',    value: netDaily, col: netDaily >= 0 ? 'var(--profit)' : 'var(--loss)', sign: true },
+              ].map(({ label, value, col }) => {
+                const absMax = Math.max(Math.abs(theta), Math.abs(funding), Math.abs(netDaily), 1);
+                const pct = Math.min(Math.abs(value) / absMax * 100, 100);
+                return (
+                  <div key={label}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.56rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tx3)' }}>{label}</span>
+                      <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.73rem', fontWeight: 700, color: col }}>{fMAD(value, true)}</span>
+                    </div>
+                    <div style={{ height: 5, background: 'var(--b1)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 3, opacity: 0.75, transition: 'width 0.6s ease' }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {theta !== 0 && funding !== 0 && (
+              <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 6, background: 'var(--elev)', border: '1px solid var(--b0)' }}>
+                <div style={{ fontFamily: 'var(--f-disp)', fontSize: '0.53rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tx3)', marginBottom: 4 }}>
+                  Couverture Theta / Fin.
+                </div>
+                <div style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '0.85rem', color: Math.abs(theta) >= Math.abs(funding) ? 'var(--profit)' : 'var(--loss)' }}>
+                  {funding !== 0 ? (Math.abs(theta / funding) * 100).toFixed(0) : '—'}%
+                </div>
+                <div style={{ fontFamily: 'var(--f-body)', fontSize: '0.56rem', color: 'var(--tx3)', marginTop: 2 }}>
+                  {Math.abs(theta) >= Math.abs(funding) ? 'Theta couvre le financement' : 'Financement > Theta'}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

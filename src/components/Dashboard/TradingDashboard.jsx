@@ -3,6 +3,7 @@ import { useTrading } from '../../contexts/TradingContext';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import MainContent from './MainContent';
+import TickerBar from './TickerBar';
 import { RefreshCw, AlertTriangle, Activity } from 'lucide-react';
 
 const TradingDashboard = () => {
@@ -88,6 +89,7 @@ const TradingDashboard = () => {
         <Sidebar />
         <MainContent />
       </div>
+      <TickerBar />
     </div>
   );
 };

@@ -5,15 +5,19 @@ import { useAdmin } from '../../contexts/AdminContext';
 import TraderManager from './TraderManager';
 import InstrumentManager from './InstrumentManager';
 import TraderLimits from './TraderLimits';
+import LimitsManager from './LimitsManager';
+import AuditLogView from './AuditLogView';
 import {
   Users, Briefcase, DollarSign, LogOut,
-  Settings, RefreshCw, AlertTriangle, X,
+  Settings, RefreshCw, AlertTriangle, X, Target, ClipboardList,
 } from 'lucide-react';
 
 const TABS = [
-  { id: 'traders',     label: 'Gestion Traders',    icon: Users,     accent: 'var(--cyan)'   },
-  { id: 'instruments', label: 'Instruments',         icon: Briefcase, accent: 'var(--eb)'    },
-  { id: 'limits',      label: 'Limites Trading',     icon: DollarSign,accent: 'var(--profit)' },
+  { id: 'traders',     label: 'Gestion Traders',    icon: Users,         accent: 'var(--cyan)'   },
+  { id: 'instruments', label: 'Instruments',         icon: Briefcase,     accent: 'var(--eb)'    },
+  { id: 'limits',      label: 'Limites Trading',     icon: DollarSign,    accent: 'var(--profit)' },
+  { id: 'objectives',  label: 'Objectifs & Limites', icon: Target,        accent: 'var(--warn)'  },
+  { id: 'audit',       label: 'Journal d\'Audit',    icon: ClipboardList, accent: 'var(--cyan)'  },
 ];
 
 const AdminDashboard = () => {
@@ -21,8 +25,10 @@ const AdminDashboard = () => {
   const { user, logout } = useAuth();
   const { traders, instruments, loading, error, refreshData, clearError } = useAdmin();
 
-  const ActiveComponent = TABS.find(t => t.id === activeTab)?.id === 'traders'   ? TraderManager
-                        : TABS.find(t => t.id === activeTab)?.id === 'instruments' ? InstrumentManager
+  const ActiveComponent = activeTab === 'traders'     ? TraderManager
+                        : activeTab === 'instruments' ? InstrumentManager
+                        : activeTab === 'objectives'  ? LimitsManager
+                        : activeTab === 'audit'       ? AuditLogView
                         : TraderLimits;
 
   const initial = (user?.firstName || user?.username || user?.name || 'A')[0].toUpperCase();
@@ -108,7 +114,7 @@ const AdminDashboard = () => {
       {/* ── Stats row ── */}
       <div style={{ padding: '12px 24px 0', display: 'flex', gap: 10 }}>
         {[
-          { label: 'Traders actifs',  value: traders.filter(t => t.status === 'ACTIF' || t.status === 'active').length, color: 'var(--profit)' },
+          { label: 'Traders actifs',  value: traders.filter(t => t.status === 'ACTIF' || t.status === 'active' || t.isActive === true).length, color: 'var(--profit)' },
           { label: 'Total traders',   value: traders.length, color: 'var(--cyan)' },
           { label: 'EuroBonds',       value: instruments.eurobonds?.length || 0, color: 'var(--eb)' },
           { label: 'CLN',             value: instruments.cln?.length || 0,       color: 'var(--cln)' },

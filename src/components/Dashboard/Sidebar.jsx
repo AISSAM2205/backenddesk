@@ -1,31 +1,245 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useTrading } from '../../contexts/TradingContext';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   LayoutDashboard, TrendingUp, BarChart2, BookOpen,
   Shield, Coins, LogOut, Wifi, WifiOff, Activity,
+  FileBarChart, ChevronRight, AlertTriangle, Tag, FileText,
 } from 'lucide-react';
 
-const NAV = [
-  { id: 'portfolio', label: 'Dashboard Global',   icon: LayoutDashboard, accent: 'var(--cyan)',   sub: 'Cockpit · P&L · Exposition' },
-  { id: 'eurobonds', label: 'Market Watch',        icon: TrendingUp,      accent: 'var(--eb)',    sub: '28 colonnes · Bloomberg'    },
-  { id: 'risk',      label: 'Pricing & Analytics', icon: BarChart2,       accent: '#9B3EEF',      sub: 'Carry · DV01 · Hedge'       },
-  { id: 'futures',   label: 'Futures & Couv.',    icon: Activity,        accent: 'var(--fut)',   sub: 'Hedge Book · DV01'          },
-  { id: 'blotter',   label: 'Trade Blotter',       icon: BookOpen,        accent: 'var(--profit)',sub: 'Saisie · Historique'        },
-  { id: 'cln',       label: 'CLN',                 icon: Shield,          accent: '#9B3EEF',      sub: 'Credit Linked Notes'        },
-  { id: 'egp',       label: 'EGP Bills',           icon: Coins,           accent: 'var(--egp)',   sub: 'Bons du Trésor Égypte'      },
+/* ─── Data ──────────────────────────────────────────────────── */
+const NAV_GROUPS = [
+  {
+    label: 'Portefeuille',
+    items: [
+      { id: 'portfolio', label: 'Dashboard Global',    icon: LayoutDashboard, accent: 'var(--cyan)',  sub: 'P&L · Cockpit · Exposition' },
+      { id: 'risk',      label: 'Pricing & Analytics', icon: BarChart2,       accent: '#9B3EEF',      sub: 'Carry · DV01 · Hedge'        },
+    ],
+  },
+  {
+    label: 'Marchés',
+    items: [
+      { id: 'eurobonds', label: 'Market Watch',    icon: TrendingUp, accent: 'var(--eb)',   sub: '28 colonnes · Bloomberg' },
+      { id: 'futures',   label: 'Futures & Couv.', icon: Activity,   accent: 'var(--fut)', sub: 'Hedge Book · DV01'        },
+      { id: 'pricing',   label: 'Pricing Screen',  icon: Tag,        accent: '#F59E0B',    sub: 'G-Spread · RV · AWB'     },
+    ],
+  },
+  {
+    label: 'Instruments',
+    items: [
+      { id: 'cln',    label: 'CLN',          icon: Shield,    accent: '#9B3EEF',    sub: 'Credit Linked Notes'    },
+      { id: 'egp',    label: 'EGP Bills',    icon: Coins,     accent: 'var(--egp)', sub: 'Bons du Trésor Égypte'  },
+      { id: 'tbills', label: 'T-Bills / CP', icon: FileText,  accent: '#10B981',    sub: 'USD · EUR · FX Breakeven'},
+    ],
+  },
+  {
+    label: 'Back-Office',
+    items: [
+      { id: 'blotter',   label: 'Trade Blotter', icon: BookOpen,     accent: 'var(--profit)', sub: 'Saisie · Historique'     },
+      { id: 'reporting', label: 'Reporting',      icon: FileBarChart, accent: 'var(--warn)',   sub: 'PDF · Objectifs · Export' },
+    ],
+  },
 ];
 
+/* ─── Formatter ─────────────────────────────────────────────── */
 const fCompact = (v) => {
   if (v == null) return null;
   const n = parseFloat(v); if (isNaN(n)) return null;
-  const a = Math.abs(n);
-  const sign = n >= 0 ? '+' : '−';
-  if (a >= 1e9) return `${sign}${(Math.abs(n) / 1e9).toFixed(2)} Md`;
-  if (a >= 1e6) return `${sign}${(Math.abs(n) / 1e6).toFixed(2)} M`;
+  const a = Math.abs(n), s = n >= 0 ? '+' : '−';
+  if (a >= 1e9) return `${s}${(a / 1e9).toFixed(2)} Md`;
+  if (a >= 1e6) return `${s}${(a / 1e6).toFixed(2)} M`;
   return n.toLocaleString('fr-FR', { maximumFractionDigits: 0 });
 };
 
+/* ─── NavItem ────────────────────────────────────────────────── */
+const NavItem = ({ id, label, icon: Icon, accent, sub, isActive, badge, alertBadge, onClick }) => {
+  const ref = useRef(null);
+
+  const onEnter = () => {
+    if (!isActive && ref.current) {
+      ref.current.style.background = 'rgba(255,255,255,0.032)';
+      ref.current.style.borderColor = 'rgba(255,255,255,0.05)';
+      ref.current.querySelector('.nav-icon').style.background = 'rgba(255,255,255,0.05)';
+      ref.current.querySelector('.nav-label').style.color = 'var(--tx1)';
+    }
+  };
+  const onLeave = () => {
+    if (!isActive && ref.current) {
+      ref.current.style.background = 'transparent';
+      ref.current.style.borderColor = 'transparent';
+      ref.current.querySelector('.nav-icon').style.background = 'transparent';
+      ref.current.querySelector('.nav-label').style.color = 'var(--tx2)';
+    }
+  };
+
+  return (
+    <button
+      ref={ref}
+      onClick={onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{
+        position: 'relative', width: '100%', textAlign: 'left',
+        padding: '6px 10px 6px 14px',
+        borderRadius: 5,
+        border: '1px solid',
+        borderColor: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+        background: isActive
+          ? 'linear-gradient(90deg, rgba(255,255,255,0.048) 0%, rgba(255,255,255,0.018) 100%)'
+          : 'transparent',
+        cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 9,
+        transition: 'background 0.1s, border-color 0.1s',
+        outline: 'none',
+      }}
+    >
+      {/* Accent bar */}
+      <span style={{
+        position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
+        width: 2, height: isActive ? 18 : 0, borderRadius: '0 2px 2px 0',
+        background: accent,
+        transition: 'height 0.18s cubic-bezier(0.34,1.56,0.64,1)',
+        boxShadow: isActive ? `0 0 7px ${accent}55` : 'none',
+      }} />
+
+      {/* Icon */}
+      <div
+        className="nav-icon"
+        style={{
+          width: 24, height: 24, borderRadius: 5, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: isActive ? `${accent}18` : 'transparent',
+          border: `1px solid ${isActive ? `${accent}30` : 'transparent'}`,
+          transition: 'background 0.12s, border-color 0.12s',
+        }}
+      >
+        <Icon size={12} style={{ color: isActive ? accent : 'var(--tx3)', transition: 'color 0.12s' }} />
+      </div>
+
+      {/* Label + sub */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          className="nav-label"
+          style={{
+            fontFamily: 'var(--f-disp)', fontWeight: isActive ? 600 : 500,
+            fontSize: '0.69rem', letterSpacing: '0.01em',
+            color: isActive ? 'var(--tx1)' : 'rgba(255,255,255,0.65)',
+            lineHeight: 1.25, transition: 'color 0.1s',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >
+          {label}
+        </div>
+        <div style={{
+          fontFamily: 'var(--f-body)', fontSize: '0.57rem',
+          color: isActive ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.14)',
+          marginTop: 1,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {sub}
+        </div>
+      </div>
+
+      {/* Badges */}
+      {alertBadge > 0 ? (
+        <span style={{
+          flexShrink: 0, padding: '1px 5px', borderRadius: 4,
+          fontFamily: 'var(--f-mono)', fontSize: '0.54rem', fontWeight: 700,
+          background: 'rgba(255,43,96,0.12)', color: 'var(--loss)',
+          border: '1px solid rgba(255,43,96,0.22)',
+          animation: 'pulse-live 2s ease infinite',
+        }}>{alertBadge}</span>
+      ) : badge > 0 ? (
+        <span style={{
+          flexShrink: 0, padding: '1px 5px', borderRadius: 4,
+          fontFamily: 'var(--f-mono)', fontSize: '0.54rem', fontWeight: 600,
+          background: 'rgba(255,255,255,0.04)', color: 'var(--tx3)',
+          border: '1px solid var(--b1)',
+        }}>{badge}</span>
+      ) : null}
+    </button>
+  );
+};
+
+/* ─── NavGroup ───────────────────────────────────────────────── */
+const NavGroup = ({
+  group, gi, isOpen,
+  badgeCounts, alertCount,
+  activeInstrument, setActiveInstrument,
+  onEnter, onLeave,
+}) => (
+  <div
+    style={{
+      marginTop: gi === 0 ? 6 : 2,
+      paddingTop: gi === 0 ? 0 : 10,
+      borderTop: gi === 0 ? 'none' : '1px solid var(--b1)',
+    }}
+    onMouseEnter={onEnter}
+    onMouseLeave={onLeave}
+  >
+    {/* Section header — toujours visible, chevron à gauche */}
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 7,
+      padding: '6px 10px 6px 8px',
+      borderRadius: 6,
+      background: isOpen ? 'var(--surf)' : 'transparent',
+      border: '1px solid',
+      borderColor: isOpen ? 'var(--b1)' : 'transparent',
+      marginBottom: 2,
+      userSelect: 'none', cursor: 'default',
+      transition: 'background 0.15s, border-color 0.15s',
+    }}>
+      <ChevronRight
+        size={12}
+        style={{
+          color: isOpen ? 'var(--cyan)' : 'var(--tx3)',
+          transform: `rotate(${isOpen ? 90 : 0}deg)`,
+          transition: 'transform 0.20s cubic-bezier(0.4,0,0.2,1), color 0.15s',
+          flexShrink: 0,
+        }}
+      />
+      <span style={{
+        fontFamily: 'var(--f-disp)', fontWeight: 600,
+        fontSize: '0.72rem', letterSpacing: '0.01em',
+        color: isOpen ? 'var(--tx1)' : 'var(--tx2)',
+        transition: 'color 0.15s',
+        flex: 1,
+      }}>
+        {group.label}
+      </span>
+    </div>
+
+    {/* Animated items wrapper */}
+    <div style={{
+      overflow: 'hidden',
+      maxHeight: isOpen ? '320px' : '0px',
+      opacity: isOpen ? 1 : 0,
+      transition: [
+        'max-height 0.26s cubic-bezier(0.4,0,0.2,1)',
+        'opacity 0.20s ease',
+      ].join(', '),
+      paddingLeft: 5,
+    }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 1,
+        paddingTop: 3, paddingBottom: 3,
+      }}>
+        {group.items.map(({ id, label, icon, accent, sub }) => (
+          <NavItem
+            key={id}
+            id={id} label={label} icon={icon} accent={accent} sub={sub}
+            isActive={activeInstrument === id}
+            badge={badgeCounts[id]}
+            alertBadge={id === 'portfolio' ? alertCount : 0}
+            onClick={() => setActiveInstrument(id)}
+          />
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+/* ─── Sidebar ────────────────────────────────────────────────── */
 const Sidebar = () => {
   const {
     activeInstrument, setActiveInstrument,
@@ -34,216 +248,257 @@ const Sidebar = () => {
   } = useTrading();
   const { user, logout } = useAuth();
 
+  const [hoveredGroup, setHoveredGroup] = useState(null);
+  const timerRef = useRef(null);
+
+  /* Always keep the group that contains the active item open */
+  const activeGroupIdx = NAV_GROUPS.findIndex(g =>
+    g.items.some(i => i.id === activeInstrument)
+  );
+
+  const isGroupOpen = (gi) => hoveredGroup === gi || gi === activeGroupIdx;
+
+  const handleEnter = (gi) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setHoveredGroup(gi);
+  };
+
+  const handleLeave = () => {
+    timerRef.current = setTimeout(() => setHoveredGroup(null), 140);
+  };
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  /* Derived data */
   const alertCount = (dashboardRows || []).filter(r => r.netDailyAlert).length;
   const pnlEco     = parseFloat(globalDashboard?.totalPlEcoMad || 0);
   const pnlPos     = pnlEco >= 0;
   const pnlStr     = fCompact(pnlEco);
 
   const badgeCounts = {
-    portfolio: alertCount || null,
+    portfolio: (dashboardRows || []).length || null,
     eurobonds: (dashboardRows || []).length || null,
     cln:       (clnList || []).length || null,
     egp:       (egpList || []).length || null,
   };
 
-  const initial = (user?.firstName || user?.username || 'T')[0].toUpperCase();
+  const initial  = (user?.firstName || user?.username || 'T')[0].toUpperCase();
+  const fullName = user?.firstName
+    ? `${user.firstName} ${user.lastName || ''}`.trim()
+    : user?.username || 'Trader';
 
   return (
     <aside style={{
-      width: 222, flexShrink: 0,
+      width: 228, flexShrink: 0,
       background: 'var(--base)',
       borderRight: '1px solid var(--b1)',
       display: 'flex', flexDirection: 'column',
-      height: '100%', overflowY: 'auto',
+      height: '100%',
     }}>
 
       {/* ── Brand ── */}
-      <div style={{ padding: '1rem 1rem 0.75rem', borderBottom: '1px solid var(--b1)' }}>
+      <div style={{ padding: '14px 14px 12px', borderBottom: '1px solid var(--b1)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src="/attijariwafa-logo.png" alt="" style={{ height: 26, width: 'auto', objectFit: 'contain' }} />
-          <div>
-            <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)', lineHeight: 1.3 }}>
-              Desk International
+          <img
+            src="/attijariwafa-logo.png" alt="AWB"
+            style={{ height: 24, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontFamily: 'var(--f-disp)', fontWeight: 700,
+              fontSize: '0.63rem', letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: 'var(--tx1)', lineHeight: 1.3,
+            }}>
+              International Trading
             </div>
-            <div style={{ fontFamily: 'var(--f-body)', fontSize: '0.60rem', color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{
+              fontFamily: 'var(--f-body)', fontSize: '0.57rem',
+              color: 'var(--tx3)', textTransform: 'uppercase',
+              letterSpacing: '0.08em', marginTop: 1,
+            }}>
               Fixed Income
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── P&L Summary Card ── */}
-      {pnlStr && (
+      {/* ── P&L Metric ── */}
+      <div style={{
+        margin: '10px 10px 6px',
+        padding: '10px 12px',
+        borderRadius: 8,
+        background: pnlPos
+          ? 'linear-gradient(135deg, rgba(0,232,153,0.07) 0%, rgba(0,232,153,0.02) 100%)'
+          : 'linear-gradient(135deg, rgba(255,43,96,0.07) 0%, rgba(255,43,96,0.02) 100%)',
+        border: `1px solid ${pnlPos ? 'rgba(0,232,153,0.14)' : 'rgba(255,43,96,0.14)'}`,
+        borderLeft: `2px solid ${pnlPos ? 'var(--profit)' : 'var(--loss)'}`,
+      }}>
         <div style={{
-          margin: '10px 10px 2px',
-          padding: '10px 12px',
-          borderRadius: 8,
-          background: pnlPos ? 'rgba(0,232,153,0.06)' : 'rgba(255,43,96,0.06)',
-          border: `1px solid ${pnlPos ? 'rgba(0,232,153,0.18)' : 'rgba(255,43,96,0.18)'}`,
+          fontFamily: 'var(--f-disp)', fontWeight: 700,
+          fontSize: '0.49rem', letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: pnlPos ? 'rgba(0,232,153,0.55)' : 'rgba(255,43,96,0.55)',
+          marginBottom: 5,
         }}>
-          <div className="lbl" style={{ marginBottom: 5 }}>P&L Économique</div>
-          <div style={{
-            fontFamily: 'var(--f-mono)', fontWeight: 600,
-            fontSize: '1.15rem', lineHeight: 1,
-            color: pnlPos ? 'var(--profit)' : 'var(--loss)',
-          }} className={pnlPos ? 'glow-profit' : 'glow-loss'}>
-            {pnlStr} <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.60rem', fontWeight: 600, opacity: 0.5 }}>MAD</span>
-          </div>
-          {alertCount > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6 }}>
-              <span className="live-dot live-dot-loss" style={{ width: 5, height: 5 }} />
-              <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.58rem', fontWeight: 700, color: 'var(--loss)', letterSpacing: '0.06em' }}>
-                {alertCount} carry négatif
-              </span>
-            </div>
-          )}
+          P&L ÉCONOMIQUE
         </div>
-      )}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+          <span style={{
+            fontFamily: 'var(--f-mono)', fontWeight: 700,
+            fontSize: pnlStr ? '1.05rem' : '0.90rem',
+            lineHeight: 1, letterSpacing: '-0.02em',
+            color: pnlPos ? 'var(--profit)' : 'var(--loss)',
+          }}>
+            {pnlStr || '— '}
+          </span>
+          <span style={{
+            fontFamily: 'var(--f-disp)', fontSize: '0.56rem',
+            fontWeight: 600, color: 'var(--tx3)', letterSpacing: '0.04em',
+          }}>
+            MAD
+          </span>
+        </div>
+        {alertCount > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            marginTop: 6, paddingTop: 6,
+            borderTop: '1px solid rgba(255,43,96,0.12)',
+          }}>
+            <AlertTriangle size={9} style={{ color: 'var(--loss)' }} />
+            <span style={{
+              fontFamily: 'var(--f-disp)', fontSize: '0.53rem',
+              fontWeight: 700, color: 'var(--loss)', letterSpacing: '0.06em',
+            }}>
+              {alertCount} CARRY NÉGATIF
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* ── Navigation ── */}
-      <nav style={{ flex: 1, padding: '8px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <div className="lbl" style={{ padding: '6px 8px 8px', fontSize: '0.55rem', letterSpacing: '0.16em' }}>
-          Navigation
-        </div>
-
-        {NAV.map(({ id, label, icon: Icon, accent, sub }) => {
-          const isActive = activeInstrument === id;
-          const badge    = badgeCounts[id];
-          return (
-            <button key={id} onClick={() => setActiveInstrument(id)}
-              style={{
-                position: 'relative', width: '100%', textAlign: 'left',
-                padding: '9px 10px 9px 14px',
-                borderRadius: 8,
-                border: '1px solid',
-                borderColor: isActive ? 'var(--b2)' : 'transparent',
-                background: isActive ? 'var(--surf)' : 'transparent',
-                cursor: 'pointer', transition: 'all 0.14s',
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}
-              onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--surf)'; e.currentTarget.style.borderColor = 'var(--b1)'; }}}
-              onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}}
-            >
-              {/* Active bar */}
-              {isActive && (
-                <span style={{
-                  position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
-                  width: 3, height: 22, borderRadius: '0 2px 2px 0',
-                  background: accent,
-                }} />
-              )}
-
-              <Icon size={14} style={{ color: isActive ? accent : 'var(--tx3)', flexShrink: 0, transition: 'color 0.14s' }} />
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontFamily: 'var(--f-disp)', fontWeight: 600,
-                  fontSize: '0.70rem', letterSpacing: '0.02em',
-                  color: isActive ? 'var(--tx1)' : 'var(--tx2)',
-                  lineHeight: 1.3, transition: 'color 0.14s',
-                }}>
-                  {label}
-                </div>
-                <div style={{
-                  fontFamily: 'var(--f-body)', fontSize: '0.60rem',
-                  color: 'var(--tx3)', marginTop: 2, lineHeight: 1.2,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {sub}
-                </div>
-              </div>
-
-              {badge && (
-                <span style={{
-                  flexShrink: 0, minWidth: 20, textAlign: 'center',
-                  padding: '2px 6px', borderRadius: 99,
-                  fontFamily: 'var(--f-mono)', fontSize: '0.60rem', fontWeight: 600,
-                  background: id === 'portfolio' && alertCount > 0
-                    ? 'rgba(255,43,96,0.15)'
-                    : 'rgba(15,60,130,0.30)',
-                  color: id === 'portfolio' && alertCount > 0
-                    ? 'var(--loss)'
-                    : 'var(--tx2)',
-                  border: '1px solid',
-                  borderColor: id === 'portfolio' && alertCount > 0
-                    ? 'rgba(255,43,96,0.28)'
-                    : 'var(--b1)',
-                  animation: id === 'portfolio' && alertCount > 0 ? 'pulse-live 2s ease infinite' : 'none',
-                }}>
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <nav style={{
+        flex: 1, padding: '4px 8px 8px',
+        overflowY: 'auto', display: 'flex', flexDirection: 'column',
+      }}>
+        {NAV_GROUPS.map((group, gi) => (
+          <NavGroup
+            key={gi}
+            group={group} gi={gi}
+            isOpen={isGroupOpen(gi)}
+            badgeCounts={badgeCounts}
+            alertCount={alertCount}
+            activeInstrument={activeInstrument}
+            setActiveInstrument={setActiveInstrument}
+            onEnter={() => handleEnter(gi)}
+            onLeave={handleLeave}
+          />
+        ))}
       </nav>
 
       {/* ── Footer ── */}
-      <div style={{ padding: '10px', borderTop: '1px solid var(--b1)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{
+        padding: '10px',
+        borderTop: '1px solid var(--b1)',
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
 
-        {/* Connection status */}
+        {/* WS status */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '7px 10px', borderRadius: 7,
-          background: connectionStatus === 'connected' ? 'rgba(0,232,153,0.06)' : 'rgba(15,60,130,0.15)',
-          border: `1px solid ${connectionStatus === 'connected' ? 'rgba(0,232,153,0.18)' : 'var(--b1)'}`,
+          display: 'flex', alignItems: 'center', gap: 7,
+          padding: '5px 9px', borderRadius: 6,
+          background: connectionStatus === 'connected'
+            ? 'rgba(0,232,153,0.04)' : 'rgba(255,255,255,0.02)',
+          border: `1px solid ${connectionStatus === 'connected'
+            ? 'rgba(0,232,153,0.13)' : 'rgba(255,255,255,0.05)'}`,
         }}>
           {connectionStatus === 'connected' ? (
             <>
-              <span className="live-dot" style={{ width: 5, height: 5 }} />
-              <Wifi size={12} style={{ color: 'var(--profit)' }} />
-              <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.60rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--profit)' }}>
-                SSE Live
+              <span style={{
+                width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+                background: 'var(--profit)',
+                boxShadow: '0 0 5px rgba(0,232,153,0.55)',
+                animation: 'pulse-live 2s ease infinite',
+              }} />
+              <Wifi size={10} style={{ color: 'var(--profit)' }} />
+              <span style={{
+                fontFamily: 'var(--f-mono)', fontSize: '0.57rem', fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'var(--profit)', flex: 1,
+              }}>
+                WebSocket Live
               </span>
             </>
           ) : (
             <>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--tx3)', flexShrink: 0 }} />
-              <WifiOff size={12} style={{ color: 'var(--tx3)' }} />
-              <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.60rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tx3)' }}>
+              <span style={{
+                width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+                background: 'var(--tx3)',
+              }} />
+              <WifiOff size={10} style={{ color: 'var(--tx3)' }} />
+              <span style={{
+                fontFamily: 'var(--f-mono)', fontSize: '0.57rem', fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'var(--tx3)', flex: 1,
+              }}>
                 Déconnecté
               </span>
             </>
           )}
         </div>
 
-        {/* User */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 2px' }}>
+        {/* User row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div style={{
             width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-            background: 'linear-gradient(135deg, rgba(0,202,255,0.20) 0%, rgba(30,127,255,0.30) 100%)',
-            border: '1px solid var(--b2)',
+            background: 'linear-gradient(135deg, rgba(0,202,255,0.18) 0%, rgba(30,127,255,0.22) 100%)',
+            border: '1px solid rgba(0,202,255,0.22)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', color: 'var(--cyan)',
+            fontFamily: 'var(--f-disp)', fontWeight: 700,
+            fontSize: '0.74rem', color: 'rgba(0,202,255,0.9)',
           }}>
             {initial}
           </div>
+
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
-              fontFamily: 'var(--f-body)', fontWeight: 500, fontSize: '0.72rem',
-              color: 'var(--tx1)', lineHeight: 1.2,
+              fontFamily: 'var(--f-body)', fontWeight: 600,
+              fontSize: '0.69rem', color: 'var(--tx1)', lineHeight: 1.25,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {user?.firstName || user?.username || 'Trader'}
+              {fullName}
             </div>
             <div style={{
-              fontFamily: 'var(--f-disp)', fontSize: '0.58rem', fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--tx3)', marginTop: 1,
+              fontFamily: 'var(--f-mono)', fontSize: '0.54rem',
+              textTransform: 'uppercase', letterSpacing: '0.08em',
+              color: user?.role === 'admin' ? 'rgba(155,62,239,0.7)' : 'var(--tx3)',
+              marginTop: 1,
             }}>
               {user?.role === 'admin' ? 'Administrateur' : 'Trader'}
             </div>
           </div>
-          <button onClick={logout} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'var(--tx3)', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center',
-            transition: 'color 0.15s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.color = 'var(--loss)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'var(--tx3)'}
-            title="Déconnexion">
-            <LogOut size={14} />
+
+          <button
+            onClick={logout}
+            title="Déconnexion"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--tx3)', padding: '5px', borderRadius: 6,
+              display: 'flex', alignItems: 'center',
+              transition: 'color 0.14s, background 0.14s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--loss)';
+              e.currentTarget.style.background = 'rgba(255,43,96,0.08)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--tx3)';
+              e.currentTarget.style.background = 'none';
+            }}
+          >
+            <LogOut size={13} />
           </button>
         </div>
+
       </div>
     </aside>
   );

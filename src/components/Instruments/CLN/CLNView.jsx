@@ -9,6 +9,60 @@ const fUSD = (v) => { if (v == null) return '—'; const n = parseFloat(v); if (
 const fMat = (d) => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); } catch { return d; } };
 const pnlColor = (v) => parseFloat(v || 0) >= 0 ? 'var(--profit)' : 'var(--loss)';
 
+/* ─── Credit Concentration Panel ─────────────────────────────────── */
+const CreditConcentration = ({ positions }) => {
+  if (!positions?.length) return null;
+  const byCounterparty = {};
+  positions.forEach(r => {
+    const cp = r.counterparty || 'Autres';
+    if (!byCounterparty[cp]) byCounterparty[cp] = { nominal: 0, plEcoMad: 0, count: 0 };
+    byCounterparty[cp].nominal  += parseFloat(r.nominalUsd || 0);
+    byCounterparty[cp].plEcoMad += parseFloat(r.plEcoMad   || 0);
+    byCounterparty[cp].count    += 1;
+  });
+  const entries = Object.entries(byCounterparty)
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.nominal - a.nominal);
+  const maxNom = entries[0]?.nominal || 1;
+  const totalNom = entries.reduce((s, e) => s + e.nominal, 0);
+  return (
+    <div className="card slide-up stagger-2" style={{ padding: '14px 16px' }}>
+      <p className="sect-ttl" style={{ marginBottom: 12 }}>Concentration Crédit — par Contrepartie</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {entries.map(e => {
+          const pct  = (e.nominal / maxNom) * 100;
+          const share = (e.nominal / totalNom * 100).toFixed(1);
+          const pnlPos = e.plEcoMad >= 0;
+          return (
+            <div key={e.name}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, alignItems: 'baseline' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.70rem', fontWeight: 500, color: 'var(--tx1)' }}>{e.name}</span>
+                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.57rem', color: 'var(--tx3)', padding: '1px 5px', background: 'var(--elev)', borderRadius: 3 }}>
+                    {e.count} pos.
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: '#C084FC' }}>
+                    {e.nominal >= 1e6 ? `${(e.nominal / 1e6).toFixed(0)}M` : `${(e.nominal / 1e3).toFixed(0)}k`} USD
+                  </span>
+                  <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.58rem', color: 'var(--tx3)' }}>{share}%</span>
+                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.63rem', color: pnlPos ? 'var(--profit)' : 'var(--loss)', fontWeight: 600 }}>
+                    {e.plEcoMad >= 0 ? '+' : ''}{(e.plEcoMad / 1e6).toFixed(2)}M
+                  </span>
+                </div>
+              </div>
+              <div style={{ height: 5, background: 'var(--b1)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: 'rgba(192,132,252,0.65)', borderRadius: 3, transition: 'width 0.6s ease' }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const SortIcon = ({ active, dir }) => {
   if (!active) return <ChevronsUpDown size={10} style={{ opacity: 0.25, marginLeft: 3 }} />;
   return dir === 'asc' ? <ChevronUp size={10} style={{ color: 'var(--cyan)', marginLeft: 3 }} /> : <ChevronDown size={10} style={{ color: 'var(--cyan)', marginLeft: 3 }} />;
@@ -56,24 +110,22 @@ const CLNView = () => {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--void)' }}>
-      <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--void)', borderBottom: '1px solid var(--b1)', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div className="view-hdr">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Shield size={14} style={{ color: '#C084FC' }} />
-            <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-              CLN — Credit Linked Notes
-            </h2>
-            <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.60rem', color: 'var(--tx3)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(192,132,252,0.3)', background: 'rgba(192,132,252,0.06)' }}>
-              Desk Structuré · Ext.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ display: 'inline-block', width: 2, height: 13, background: '#9B3EEF', borderRadius: 1, flexShrink: 0 }} />
+            <h2 className="view-title">CLN — Credit Linked Notes</h2>
+            <span className="tag" style={{ marginLeft: 2, color: '#C084FC', borderColor: 'rgba(192,132,252,0.3)', background: 'rgba(192,132,252,0.06)' }}>
+              Structuré
             </span>
           </div>
-          <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', marginTop: 2 }}>
+          <p className="view-sub" style={{ paddingLeft: 9 }}>
             {clnList.length} position{clnList.length !== 1 ? 's' : ''}
-            {snapshotDate && <span style={{ marginLeft: 8, color: 'rgba(156,163,175,0.5)' }}>snapshot {snapshotDate}</span>}
+            {snapshotDate && <span style={{ marginLeft: 8, color: 'var(--tx3)' }}>snapshot {snapshotDate}</span>}
           </p>
         </div>
         <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
-          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
         </button>
       </div>
 
@@ -82,19 +134,22 @@ const CLNView = () => {
         {/* KPI Row */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            ['P&L Économique (MAD)', fMAD(totals.plEcoMad),      pnlColor(totals.plEcoMad),      totals.plEcoMad >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['P&L Réalisé (USD)',    fUSD(totals.plRealizedUsd),  pnlColor(totals.plRealizedUsd), totals.plRealizedUsd >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['P&L Latent (USD)',     fUSD(totals.plLatentUsd),    pnlColor(totals.plLatentUsd),   totals.plLatentUsd >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['Nominal Total (USD)',  `${fN(totals.nominalUsd / 1e6, 0)} M`, 'var(--tx1)',         'kpi-top-violet'],
-            ['Financement (USD)',    fUSD(totals.fundingUsd),     'var(--warn)',                   'kpi-top-warn'],
-            ['Nb Positions',         clnList.length.toString(),   '#C084FC',                      'kpi-top-violet'],
-          ].map(([label, value, valColor, topClass]) => (
-            <div key={label} className={`card ${topClass}`} style={{ flex: '1 1 140px', padding: '13px 15px' }}>
-              <div className="lbl" style={{ marginBottom: 8 }}>{label}</div>
-              <div className="n" style={{ fontSize: '1.15rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.02em' }}>{value}</div>
+            ['P&L Économique (MAD)', fMAD(totals.plEcoMad),      pnlColor(totals.plEcoMad)],
+            ['P&L Réalisé (USD)',    fUSD(totals.plRealizedUsd),  pnlColor(totals.plRealizedUsd)],
+            ['P&L Latent (USD)',     fUSD(totals.plLatentUsd),    pnlColor(totals.plLatentUsd)],
+            ['Nominal Total (USD)',  `${fN(totals.nominalUsd / 1e6, 0)} M`, 'var(--tx1)'],
+            ['Financement (USD)',    fUSD(totals.fundingUsd),     'var(--warn)'],
+            ['Nb Positions',         clnList.length.toString(),   '#C084FC'],
+          ].map(([label, value, valColor]) => (
+            <div key={label} className="card" style={{ flex: '1 1 130px', padding: '8px 10px' }}>
+              <div className="lbl" style={{ marginBottom: 5, fontSize: '0.53rem', letterSpacing: '0.12em' }}>{label}</div>
+              <div className="n" style={{ fontSize: '1.10rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.02em' }}>{value}</div>
             </div>
           ))}
         </div>
+
+        {/* Credit Concentration */}
+        <CreditConcentration positions={clnList} />
 
         {/* Table */}
         <div className="card" style={{ overflow: 'hidden' }}>

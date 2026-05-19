@@ -70,6 +70,11 @@ const FuturesView = () => {
 
   const totalNetPos = futureRows.reduce((s, r) => s + (parseInt(r.futuresNetPosition, 10) || 0), 0);
 
+  const hedgeCoverage = useMemo(() => {
+    const totalCurrent = sorted.reduce((s, r) => s + Math.abs(parseInt(r.currentFuturesPosition, 10) || 0), 0);
+    return totals.nbContractsNeeded > 0 ? Math.min((totalCurrent / totals.nbContractsNeeded) * 100, 100) : 0;
+  }, [sorted, totals]);
+
   const Th = ({ k, label, right }) => (
     <th onClick={() => handleSort(k)} style={{ textAlign: right ? 'right' : 'left', cursor: 'pointer', color: sortKey === k ? 'var(--fut)' : 'var(--tx3)' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: right ? 'flex-end' : 'flex-start' }}>
@@ -81,40 +86,64 @@ const FuturesView = () => {
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--void)' }}>
       {/* Header */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--void)', borderBottom: '1px solid var(--b1)', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div className="view-hdr">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <TrendingUp size={14} style={{ color: 'var(--fut)' }} />
-            <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-              Futures & Couverture
-            </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ display: 'inline-block', width: 2, height: 13, background: 'var(--fut)', borderRadius: 1, flexShrink: 0 }} />
+            <h2 className="view-title">Futures &amp; Couverture</h2>
           </div>
-          <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', marginTop: 2 }}>
-            {sorted.length} position{sorted.length !== 1 ? 's' : ''} couvertes · {futureRows.length} contrats actifs · {selectedDate}
+          <p className="view-sub" style={{ paddingLeft: 9 }}>
+            {sorted.length} positions couvertes · {futureRows.length} contrats actifs · {selectedDate}
           </p>
         </div>
-        <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
-          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="tag">{sorted.length} pos.</span>
+          <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
+            <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* KPI Row — Futures positions */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'stretch' }}>
           {[
-            ['Position Nette', `${totalNetPos > 0 ? '+' : ''}${totalNetPos} cts`, 'var(--fut)', 'kpi-top-teal'],
-            ['P&L Éco Futures', fMAD(futTotals.pnlEco), pnlColor(futTotals.pnlEco), futTotals.pnlEco >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['P&L Comptable', fMAD(futTotals.pnlAcct), pnlColor(futTotals.pnlAcct), futTotals.pnlAcct >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['Net Daily', fMAD(futTotals.netDaily), pnlColor(futTotals.netDaily), futTotals.netDaily >= 0 ? 'kpi-top-cyan' : 'kpi-top-red'],
-            ['DV01 à couvrir', `${fN(totals.dv01, 0)} $/bp`, '#60A5FA', 'kpi-top-blue'],
-            ['Contrats nécessaires', `${totals.nbContractsNeeded} cts`, 'var(--warn)', 'kpi-top-warn'],
-          ].map(([label, value, valColor, topClass]) => (
-            <div key={label} className={`card ${topClass}`} style={{ flex: '1 1 140px', padding: '13px 15px' }}>
-              <div className="lbl" style={{ marginBottom: 8 }}>{label}</div>
+            ['Position Nette',       `${totalNetPos > 0 ? '+' : ''}${totalNetPos} cts`, 'var(--fut)'],
+            ['P&L Éco Futures',      fMAD(futTotals.pnlEco),   pnlColor(futTotals.pnlEco)],
+            ['P&L Comptable',        fMAD(futTotals.pnlAcct),  pnlColor(futTotals.pnlAcct)],
+            ['Net Daily',            fMAD(futTotals.netDaily), pnlColor(futTotals.netDaily)],
+            ['DV01 à couvrir',       `${fN(totals.dv01, 0)} $/bp`, '#60A5FA'],
+            ['Contrats nécessaires', `${totals.nbContractsNeeded} cts`, 'var(--warn)'],
+          ].map(([label, value, valColor]) => (
+            <div key={label} className="card" style={{ flex: '1 1 140px', padding: '8px 10px' }}>
+              <div className="lbl" style={{ marginBottom: 5 }}>{label}</div>
               <div className="n" style={{ fontSize: '1.10rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.02em' }}>{value}</div>
             </div>
           ))}
+
+          {/* Hedge Coverage Arc Gauge */}
+          {totals.nbContractsNeeded > 0 && (() => {
+            const ARC_R = 30, ARC_T = Math.PI * ARC_R;
+            const fill = (hedgeCoverage / 100) * ARC_T;
+            const coverColor = hedgeCoverage >= 90 ? 'var(--profit)' : hedgeCoverage >= 60 ? 'var(--warn)' : 'var(--loss)';
+            return (
+              <div className="card" style={{ flex: '1 1 140px', padding: '8px 10px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <div className="lbl" style={{ marginBottom: 4, textAlign: 'center' }}>Couverture Hedge</div>
+                <svg viewBox="0 0 100 56" style={{ width: 110, maxHeight: 60 }}>
+                  <path d="M 14,50 A 30,30 0 0,1 86,50" fill="none" stroke="var(--b1)" strokeWidth="7" strokeLinecap="round" />
+                  <path d="M 14,50 A 30,30 0 0,1 86,50" fill="none" stroke={coverColor} strokeWidth="7" strokeLinecap="round"
+                    strokeDasharray={`${fill.toFixed(2)} ${ARC_T.toFixed(2)}`}
+                    style={{ transition: 'stroke-dasharray 0.9s cubic-bezier(0.34,1.56,0.64,1)' }} />
+                  <text x="50" y="36" textAnchor="middle" fill={coverColor} fontSize="13"
+                    fontFamily="JetBrains Mono,monospace" fontWeight="700">{`${hedgeCoverage.toFixed(0)}%`}</text>
+                  <text x="50" y="48" textAnchor="middle" fill="var(--tx3)" fontSize="7" fontFamily="Syne,sans-serif">
+                    {`${sorted.reduce((s,r)=>s+Math.abs(parseInt(r.currentFuturesPosition,10)||0),0)}/${totals.nbContractsNeeded} cts`}
+                  </text>
+                </svg>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Active futures positions block */}
@@ -243,6 +272,7 @@ const FuturesView = () => {
             </div>
           )}
         </div>
+
 
         {/* Alert when hedge gap is significant */}
         {sorted.some(r => parseInt(r.nbContractsToHedge, 10) > 0 && Math.abs(parseInt(r.currentFuturesPosition, 10) || 0) < parseInt(r.nbContractsToHedge, 10)) && (

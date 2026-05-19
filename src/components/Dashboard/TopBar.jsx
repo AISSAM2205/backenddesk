@@ -23,6 +23,11 @@ const useClock = () => {
   return time;
 };
 
+const addDays = (n) => {
+  const d = new Date(); d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+};
+
 const TopBar = () => {
   const { user } = useAuth();
   const { globalDashboard, dashboardRows, connectionStatus, loading, refresh, lastUpdate, selectedDate, setDate } = useTrading();
@@ -93,23 +98,34 @@ const TopBar = () => {
           {/* ── CENTER: P&L + Clock + Date ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, justifyContent: 'center' }}>
 
-            {/* Live P&L pill */}
+            {/* Live P&L chip */}
             {pnlStr && (
               <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '5px 14px', borderRadius: 6,
-                background: pnlPos ? 'rgba(0,232,153,0.08)' : 'rgba(255,43,96,0.08)',
-                border: `1px solid ${pnlPos ? 'rgba(0,232,153,0.20)' : 'rgba(255,43,96,0.20)'}`,
+                display: 'flex', alignItems: 'center', gap: 0,
+                borderRadius: 3, overflow: 'hidden',
+                border: `1px solid ${pnlPos ? 'rgba(0,232,153,0.22)' : 'rgba(255,43,96,0.22)'}`,
               }}>
-                <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx3)' }}>
-                  P&L ÉCO
-                </span>
-                <span style={{
-                  fontFamily: 'var(--f-mono)', fontWeight: 600, fontSize: '0.82rem',
-                  color: pnlPos ? 'var(--profit)' : 'var(--loss)',
-                }} className={pnlPos ? 'glow-profit' : 'glow-loss'}>
-                  {pnlStr}
-                </span>
+                <div style={{
+                  padding: '4px 8px',
+                  background: 'var(--elev)',
+                  borderRight: `1px solid ${pnlPos ? 'rgba(0,232,153,0.22)' : 'rgba(255,43,96,0.22)'}`,
+                }}>
+                  <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx3)' }}>
+                    P&L ÉCO
+                  </span>
+                </div>
+                <div style={{
+                  padding: '4px 12px',
+                  background: pnlPos ? 'rgba(0,232,153,0.07)' : 'rgba(255,43,96,0.07)',
+                }}>
+                  <span style={{
+                    fontFamily: 'var(--f-mono)', fontWeight: 600, fontSize: '0.80rem',
+                    letterSpacing: '-0.02em',
+                    color: pnlPos ? 'var(--profit)' : 'var(--loss)',
+                  }}>
+                    {pnlStr}
+                  </span>
+                </div>
               </div>
             )}
 
@@ -126,20 +142,47 @@ const TopBar = () => {
               </span>
             </div>
 
-            {/* Date picker */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 10px', borderRadius: 6,
-              background: 'var(--surf)', border: '1px solid var(--b1)',
-            }}>
-              <Calendar size={11} style={{ color: 'var(--tx3)' }} />
-              <input type="date" value={selectedDate} onChange={e => setDate(e.target.value)}
-                style={{
-                  background: 'transparent', border: 'none', outline: 'none',
-                  fontFamily: 'var(--f-mono)', fontSize: '0.72rem', color: 'var(--tx1)',
-                  cursor: 'pointer',
-                }}
-              />
+            {/* Quick-date + Date picker */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {[{ label: 'Auj.', d: 0 }, { label: 'J−1', d: -1 }, { label: 'J−5', d: -5 }].map(({ label, d }) => {
+                const target = addDays(d);
+                const active = selectedDate === target;
+                return (
+                  <button key={label} onClick={() => setDate(target)}
+                    style={{
+                      fontFamily: 'var(--f-mono)', fontSize: '0.58rem', fontWeight: 600,
+                      padding: '3px 7px', borderRadius: 'var(--r-xs)', cursor: 'pointer',
+                      background: active ? 'var(--cyan)' : 'transparent',
+                      color: active ? 'var(--void)' : 'var(--tx3)',
+                      border: `1px solid ${active ? 'var(--cyan)' : 'var(--b1)'}`,
+                      transition: 'all 0.12s',
+                      letterSpacing: '0.03em',
+                    }}
+                    onMouseEnter={e => { if (!active) { e.currentTarget.style.color = 'var(--tx2)'; e.currentTarget.style.borderColor = 'var(--b2)'; }}}
+                    onMouseLeave={e => { if (!active) { e.currentTarget.style.color = 'var(--tx3)'; e.currentTarget.style.borderColor = 'var(--b1)'; }}}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '3px 8px', borderRadius: 'var(--r-xs)',
+                background: 'var(--surf)', border: '1px solid var(--b1)', marginLeft: 2,
+                transition: 'border-color 0.12s',
+              }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--b2)'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--b1)'}
+              >
+                <Calendar size={10} style={{ color: 'var(--tx3)' }} />
+                <input type="date" value={selectedDate} onChange={e => setDate(e.target.value)}
+                  style={{
+                    background: 'transparent', border: 'none', outline: 'none',
+                    fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--tx1)',
+                    cursor: 'pointer', letterSpacing: '0.01em',
+                  }}
+                />
+              </div>
             </div>
           </div>
 
@@ -188,21 +231,22 @@ const TopBar = () => {
             <span style={{ width: 1, height: 22, background: 'var(--b1)' }} />
 
             {/* User chip */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <div style={{
-                width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                background: 'linear-gradient(135deg, rgba(0,202,255,0.20) 0%, rgba(30,127,255,0.30) 100%)',
-                border: '1px solid var(--b2)',
+                width: 26, height: 26, borderRadius: 'var(--r-xs)', flexShrink: 0,
+                background: 'linear-gradient(135deg, rgba(0,202,255,0.16) 0%, rgba(30,127,255,0.22) 100%)',
+                border: '1px solid rgba(0,202,255,0.22)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.75rem', color: 'var(--cyan)',
+                fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.70rem',
+                color: 'rgba(0,202,255,0.90)',
               }}>
                 {initial}
               </div>
               <div className="hidden sm:block">
-                <div style={{ fontFamily: 'var(--f-body)', fontWeight: 500, fontSize: '0.72rem', color: 'var(--tx1)', lineHeight: 1.2 }}>
+                <div style={{ fontFamily: 'var(--f-body)', fontWeight: 500, fontSize: '0.70rem', color: 'var(--tx1)', lineHeight: 1.2 }}>
                   {user?.firstName || user?.username || 'Trader'}
                 </div>
-                <div style={{ fontFamily: 'var(--f-disp)', fontSize: '0.57rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--tx3)' }}>
+                <div style={{ fontFamily: 'var(--f-disp)', fontSize: '0.55rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--tx3)' }}>
                   {user?.department || 'Fixed Income'}
                 </div>
               </div>

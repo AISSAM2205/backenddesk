@@ -72,6 +72,17 @@ const api = {
     getTotals: (date = today()) =>
       apiClient.get('/api/external/all', { params: { date } }),
   },
+  tbills: {
+    // GET /api/tbills?date=YYYY-MM-DD → List<TBillPosition> (USD + EUR)
+    getAll: (date = today()) =>
+      apiClient.get('/api/tbills', { params: { date } }),
+    // GET /api/tbills/usd?date=YYYY-MM-DD → List<TBillPosition> USD seulement
+    getUsd: (date = today()) =>
+      apiClient.get('/api/tbills/usd', { params: { date } }),
+    // GET /api/tbills/eur?date=YYYY-MM-DD → List<TBillPosition> EUR seulement
+    getEur: (date = today()) =>
+      apiClient.get('/api/tbills/eur', { params: { date } }),
+  },
   trades: {
     // GET /api/trades?isin=...&way=BUY&subAsset=Mor+Bond
     // NOTE: backend only accepts isin, way, subAsset — NOT isClosed (filter client-side)
@@ -120,12 +131,24 @@ const api = {
     createTrader: (dto)     => apiClient.post('/api/admin/traders', dto),
     // PUT /api/admin/traders/{id}
     updateTrader: (id, dto) => apiClient.put(`/api/admin/traders/${id}`, dto),
-    // DELETE /api/admin/traders/{id}
+    // DELETE /api/admin/traders/{id} → soft delete (isActive=false)
     deleteTrader: (id)      => apiClient.delete(`/api/admin/traders/${id}`),
     // PUT /api/admin/traders/{id}/limits
     updateLimits: (id, dto) => apiClient.put(`/api/admin/traders/${id}/limits`, dto),
-    // GET /api/admin/instruments/{type} → List
-    getInstruments: (type)  => apiClient.get(`/api/admin/instruments/${type}`),
+    // GET /api/admin/instruments/{type} → List (eurobonds | cln | egp)
+    getInstruments: (type)     => apiClient.get(`/api/admin/instruments/${type}`),
+    // POST /api/admin/instruments → create
+    createInstrument: (dto)    => apiClient.post('/api/admin/instruments', dto),
+    // PUT /api/admin/instruments/{isin} → update
+    updateInstrument: (isin, dto) => apiClient.put(`/api/admin/instruments/${isin}`, dto),
+    // DELETE /api/admin/instruments/{isin} → soft delete
+    deleteInstrument: (isin)   => apiClient.delete(`/api/admin/instruments/${isin}`),
+    // GET /api/admin/portfolio-limits → regulatory limits + annual targets
+    getPortfolioLimits: ()     => apiClient.get('/api/admin/portfolio-limits'),
+    // PUT /api/admin/portfolio-limits/{id}
+    updatePortfolioLimit: (id, dto) => apiClient.put(`/api/admin/portfolio-limits/${id}`, dto),
+    // GET /api/admin/audit → top-50 AuditLog
+    getAuditLog: ()            => apiClient.get('/api/admin/audit'),
   },
   auth: {
     // POST /api/auth/login → { token, user }

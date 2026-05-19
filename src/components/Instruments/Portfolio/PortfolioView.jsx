@@ -3,7 +3,7 @@ import { useTrading } from '../../../contexts/TradingContext';
 import { useAuth } from '../../../contexts/AuthContext';
 import {
   TrendingUp, TrendingDown, Activity, AlertTriangle,
-  RefreshCw, WifiOff, ChevronDown, ChevronUp,
+  RefreshCw, WifiOff, ChevronDown, ChevronUp, Calendar,
 } from 'lucide-react';
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -34,6 +34,8 @@ const fPct = (v, d = 2) => {
   if (v == null) return '—'; const n = parseFloat(v); if (isNaN(n)) return '—';
   return `${n >= 0 ? '+' : ''}${n.toFixed(d)} %`;
 };
+const fCoupon  = (v) => { if (v == null) return '—'; const n = parseFloat(v); if (isNaN(n)) return '—'; return `${(n < 1 ? n * 100 : n).toFixed(2)}%`; };
+const fMatDate = (s) => { if (!s) return '—'; const p = s.split('-'); return p.length >= 2 ? `${p[1]}/${String(p[0]).slice(2)}` : s; };
 const pnlColor = (v) => parseFloat(v || 0) >= 0 ? 'var(--profit)' : 'var(--loss)';
 const pnlGlow  = (v) => parseFloat(v || 0) >= 0 ? 'glow-profit' : 'glow-loss';
 
@@ -55,17 +57,14 @@ const useFlash = (value) => {
 };
 
 /* ─── KPI Card ───────────────────────────────────────────────────── */
-const KpiCard = ({ label, value, sub, topClass, valueColor, valueClass = '', icon: Icon, animClass = '' }) => (
-  <div className={`card ${topClass} ${animClass}`} style={{ flex: '1 1 160px', padding: '14px 16px', position: 'relative', overflow: 'hidden' }}>
-    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
-      <span className="lbl">{label}</span>
-      {Icon && <Icon size={14} style={{ color: valueColor, opacity: 0.7, flexShrink: 0 }} />}
-    </div>
-    <div className={`n ${valueClass}`} style={{ fontSize: '1.5rem', fontWeight: 600, lineHeight: 1, color: valueColor, letterSpacing: '-0.03em' }}>
+const KpiCard = ({ label, value, sub, valueColor, valueClass = '', animClass = '' }) => (
+  <div className={`card ${animClass}`} style={{ flex: '1 1 148px', padding: '8px 10px', overflow: 'hidden' }}>
+    <span className="lbl" style={{ display: 'block', marginBottom: 5, fontSize: '0.53rem', letterSpacing: '0.12em' }}>{label}</span>
+    <div className={`n ${valueClass}`} style={{ fontSize: '1.30rem', fontWeight: 600, lineHeight: 1, color: valueColor, letterSpacing: '-0.03em' }}>
       {value}
     </div>
     {sub && (
-      <div style={{ marginTop: 8, fontFamily: 'var(--f-body)', fontSize: '0.67rem', color: 'var(--tx3)', lineHeight: 1.4 }}>
+      <div style={{ marginTop: 6, fontFamily: 'var(--f-body)', fontSize: '0.60rem', color: 'var(--tx3)', lineHeight: 1.3 }}>
         {sub}
       </div>
     )}
@@ -305,10 +304,15 @@ const PositionRow = ({ r, idx }) => {
       <td style={{ color: 'var(--tx1)', fontWeight: 500 }}>
         {fN(parseFloat(r.netNominal || 0) / 1e6, 1)}<span style={{ color: 'var(--tx3)', fontSize: '0.60rem', marginLeft: 2 }}>M</span>
       </td>
+      <td style={{ color: 'var(--tx3)', textAlign: 'right' }}>{fCoupon(r.couponRate)}</td>
+      <td style={{ color: 'var(--tx3)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fMatDate(r.maturityDate)}</td>
       <td style={{ color: 'var(--tx2)' }}>{fN(r.lastWapDirty, 4)}</td>
       <td>{fN(r.dirtyMarket, 4)}</td>
       <td style={{ color: pnlColor(parseFloat(r.perfWap || 0) * 100), fontWeight: 500 }}>
         {fPct(parseFloat(r.perfWap || 0) * 100, 3)}
+      </td>
+      <td style={{ color: 'var(--tx2)', textAlign: 'right' }}>
+        {r.gSpreadBid != null ? `${fN(r.gSpreadBid, 0)} bp` : '—'}
       </td>
       <td style={{ color: pnlColor(r.pnlEconomicMad), fontWeight: 600 }}>
         {fMAD(r.pnlEconomicMad, true)}
@@ -318,7 +322,328 @@ const PositionRow = ({ r, idx }) => {
       </td>
       <td style={{ color: 'var(--tx2)' }}>{fN(r.modifiedDuration, 2)}</td>
       <td style={{ color: '#60A5FA' }}>{fN(r.dv01Bond, 0)}</td>
+      <td style={{ textAlign: 'center' }}>
+        {r.decision === 'BUY'
+          ? <span className="badge badge-active">▲ BUY</span>
+          : r.decision === 'HOLD'
+          ? <span className="badge badge-closed">— HOLD</span>
+          : null}
+      </td>
     </tr>
+  );
+};
+
+/* ─── Category Row ───────────────────────────────────────────────── */
+const CAT_STYLE = {
+  EUROBOND: { bg: 'rgba(30,127,255,0.05)',  bgBadge: 'rgba(30,127,255,0.15)',  border: 'rgba(30,127,255,0.22)'  },
+  CLN:      { bg: 'rgba(155,62,239,0.05)', bgBadge: 'rgba(155,62,239,0.15)', border: 'rgba(155,62,239,0.22)'  },
+  EGP:      { bg: 'rgba(0,194,140,0.05)',  bgBadge: 'rgba(0,194,140,0.15)',  border: 'rgba(0,194,140,0.22)'   },
+};
+
+const CatRow = ({ catKey, label, color, rows, totalPnl }) => {
+  const gPnl = rows.reduce((s, r) => s + parseFloat(r.pnlEconomicMad || 0), 0);
+  const gNet = rows.reduce((s, r) => s + parseFloat(r.netDailyMad    || 0), 0);
+  const gNom = rows.reduce((s, r) => s + parseFloat(r.netNominal     || 0), 0);
+  const contribution = Math.abs(totalPnl) > 0 ? (gPnl / Math.abs(totalPnl) * 100) : 0;
+  const st = CAT_STYLE[catKey] || CAT_STYLE.EUROBOND;
+  return (
+    <tr style={{ background: st.bg, borderTop: `2px solid ${st.border}`, userSelect: 'none' }}>
+      <td colSpan={3} style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.60rem', letterSpacing: '0.12em', textTransform: 'uppercase', color, padding: '7px 8px 7px 12px' }}>
+        <span style={{ opacity: 0.6, marginRight: 6 }}>&#9658;</span>
+        {label}
+        <span style={{ marginLeft: 8, fontFamily: 'var(--f-mono)', fontSize: '0.55rem', padding: '1px 5px', borderRadius: 4, background: st.bgBadge, border: `1px solid ${st.border}` }}>
+          {rows.length}
+        </span>
+      </td>
+      <td style={{ fontFamily: 'var(--f-mono)', fontWeight: 600, fontSize: '0.70rem', color: 'var(--tx1)', textAlign: 'right' }}>
+        {fN(gNom / 1e6, 1)}<span style={{ color: 'var(--tx3)', fontSize: '0.58rem', marginLeft: 2 }}>M</span>
+      </td>
+      <td colSpan={6} />
+      <td style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '0.70rem', color: pnlColor(gPnl), textAlign: 'right' }}>
+        {fMAD(gPnl, true)}
+        {Math.abs(contribution) > 0.5 && (
+          <span style={{ display: 'block', fontSize: '0.55rem', color: 'var(--tx3)', fontWeight: 400 }}>
+            {contribution >= 0 ? '+' : ''}{contribution.toFixed(0)}%
+          </span>
+        )}
+      </td>
+      <td style={{ fontFamily: 'var(--f-mono)', fontSize: '0.70rem', color: pnlColor(gNet), textAlign: 'right' }}>
+        {fMAD(gNet, true)}
+      </td>
+      <td colSpan={3} />
+    </tr>
+  );
+};
+
+/* ─── Market Rates Strip ─────────────────────────────────────────── */
+const RATES_ITEMS = [
+  { label: 'SOFR',     key: 'sofr',       fmt: v => `${parseFloat(v).toFixed(2)}%`, fallback: '4.30%', col: '#60A5FA' },
+  { label: 'ESTR',     key: 'estr',       fmt: v => `${parseFloat(v).toFixed(2)}%`, fallback: '2.17%', col: '#60A5FA' },
+  { label: 'SOFR 10Y', key: 'sofr10Year', fmt: v => `${parseFloat(v).toFixed(2)}%`, fallback: '3.90%', col: '#C084FC' },
+  { label: 'USD/MAD',  key: 'usdMad',     fmt: v => parseFloat(v).toFixed(3),       fallback: '9.251',  col: '#FCD34D' },
+  { label: 'EUR/MAD',  key: 'eurMad',     fmt: v => parseFloat(v).toFixed(3),       fallback: '10.418', col: '#FCD34D' },
+  { label: 'EUR/USD',  key: 'eurUsd',     fmt: v => parseFloat(v).toFixed(3),       fallback: '1.126',  col: '#34D399' },
+];
+
+const RatesStrip = ({ rates }) => (
+  <div style={{ background: 'var(--surf)', borderBottom: '1px solid var(--b0)', padding: '4px 20px', display: 'flex', alignItems: 'center', gap: 0, overflowX: 'auto', flexShrink: 0, minHeight: 26 }}>
+    <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.50rem', fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: rates ? 'var(--profit)' : 'var(--tx3)', marginRight: 12, flexShrink: 0, padding: '1px 5px', borderRadius: 3, background: rates ? 'rgba(0,232,153,0.08)' : 'rgba(100,116,139,0.10)', border: `1px solid ${rates ? 'rgba(0,232,153,0.18)' : 'rgba(100,116,139,0.18)'}` }}>
+      {rates ? 'LIVE' : 'REF.'}
+    </span>
+    {RATES_ITEMS.map((item, i) => {
+      const raw     = rates?.[item.key];
+      const display = raw != null ? item.fmt(raw) : item.fallback;
+      return (
+        <React.Fragment key={item.label}>
+          {i > 0 && <span style={{ color: 'var(--b2)', padding: '0 10px', flexShrink: 0, fontSize: '0.60rem' }}>·</span>}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, flexShrink: 0 }}>
+            <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.50rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)' }}>{item.label}</span>
+            <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.70rem', fontWeight: 600, color: item.col }}>{display}</span>
+          </div>
+        </React.Fragment>
+      );
+    })}
+  </div>
+);
+
+/* ─── G-Spread Watchlist ─────────────────────────────────────────── */
+const GSpreadWatchlist = ({ positions }) => {
+  const bonds = (positions || [])
+    .filter(r => r.gSpreadBid != null)
+    .sort((a, b) => {
+      const dA = parseFloat(a.gSpreadBid || 0) - parseFloat(a.targetSpread || 0);
+      const dB = parseFloat(b.gSpreadBid || 0) - parseFloat(b.targetSpread || 0);
+      return dB - dA;
+    });
+  if (!bonds.length) return null;
+  const maxBid = Math.max(...bonds.map(r => parseFloat(r.gSpreadBid || 0)), 1);
+  const buys   = bonds.filter(r => r.decision === 'BUY').length;
+  return (
+    <div className="card slide-up stagger-2" style={{ overflow: 'hidden' }}>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h3 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+            G-Spread Watchlist
+          </h3>
+          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: 'var(--tx3)', padding: '2px 7px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)' }}>
+            {bonds.length}
+          </span>
+          {buys > 0 && <span className="badge badge-active">▲ {buys} BUY</span>}
+        </div>
+        <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.59rem', color: 'var(--tx3)' }}>
+          Bid vs Target · bp · trié par opportunité
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', minWidth: 160 }}>Obligation</th>
+              <th style={{ textAlign: 'right' }}>Bid bp</th>
+              <th style={{ textAlign: 'right' }}>Mid bp</th>
+              <th style={{ textAlign: 'right' }}>Target</th>
+              <th style={{ textAlign: 'center', minWidth: 110 }}>Spread / Target</th>
+              <th style={{ textAlign: 'right' }}>Gap</th>
+              <th style={{ textAlign: 'center' }}>Signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bonds.map((r, idx) => {
+              const bid    = parseFloat(r.gSpreadBid   || 0);
+              const mid    = parseFloat(r.gSpreadMid   || 0);
+              const target = parseFloat(r.targetSpread || 0);
+              const gap    = bid - target;
+              const isBuy  = r.decision === 'BUY';
+              const bidPct = (bid / maxBid) * 100;
+              const tgtPct = target > 0 ? (target / maxBid) * 100 : 0;
+              const rowBg  = idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent';
+              return (
+                <tr key={r.isin} style={{ background: rowBg }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--tr-hover-bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background = rowBg}>
+                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.70rem', color: 'var(--tx1)' }} title={r.description}>
+                    {r.description || r.isin}
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: '#FCD34D', fontWeight: 500 }}>{fN(bid, 1)}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--tx2)' }}>{fN(mid, 1)}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--tx3)' }}>
+                    {target > 0 ? fN(target, 1) : '—'}
+                  </td>
+                  <td>
+                    <div style={{ position: 'relative', height: 6, background: 'var(--elev)', borderRadius: 3, overflow: 'hidden', margin: '0 4px' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${bidPct}%`, background: isBuy ? 'rgba(0,232,153,0.65)' : 'rgba(200,145,12,0.55)', borderRadius: 3 }} />
+                      {tgtPct > 0 && <div style={{ position: 'absolute', left: `${tgtPct}%`, top: -1, bottom: -1, width: 2, background: 'rgba(255,43,96,0.75)', transform: 'translateX(-50%)' }} />}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', fontWeight: 600, color: gap > 0 ? 'var(--profit)' : gap < -5 ? 'var(--loss)' : 'var(--tx2)' }}>
+                    {gap > 0 ? '+' : ''}{fN(gap, 1)}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {isBuy
+                      ? <span className="badge badge-active">▲ BUY</span>
+                      : <span className="badge badge-closed">— HOLD</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Coupon Calendar ────────────────────────────────────────────── */
+const USD_MAD_REF = 9.251;
+
+const nextSemiAnnualCoupon = (matStr) => {
+  if (!matStr) return null;
+  const today = new Date();
+  const mat = new Date(matStr);
+  if (isNaN(mat.getTime())) return null;
+  const m = mat.getMonth(), d = mat.getDate();
+  const m2 = (m + 6) % 12;
+  const yr = today.getFullYear();
+  const candidates = [
+    new Date(yr, m, d),
+    new Date(yr, m2, d),
+    new Date(yr + 1, m, d),
+    new Date(yr + 1, m2, d),
+  ].filter(dt => dt > today).sort((a, b) => a - b);
+  return candidates[0] || null;
+};
+
+const fDateLong = (dt) => {
+  if (!dt) return '—';
+  return dt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const CouponCalendar = ({ positions }) => {
+  const events = useMemo(() => {
+    const today = new Date();
+    return (positions || [])
+      .filter(r => r.couponRate && r.maturityDate && r.netNominal)
+      .map(r => {
+        const nextDate = nextSemiAnnualCoupon(r.maturityDate);
+        if (!nextDate) return null;
+        const daysLeft = Math.round((nextDate - today) / 86400000);
+        const rate = parseFloat(r.couponRate);
+        const nominal = parseFloat(r.netNominal);
+        const effectiveRate = rate < 1 ? rate : rate / 100;
+        const couponAmtUsd = effectiveRate * nominal / 2;
+        return {
+          isin: r.isin,
+          desc: r.description,
+          nextDate,
+          daysLeft,
+          couponAmtUsd,
+          couponAmtMad: couponAmtUsd * USD_MAD_REF,
+          couponRatePct: (effectiveRate * 100).toFixed(2),
+          subAsset: r.subAsset,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.daysLeft - b.daysLeft)
+      .slice(0, 10);
+  }, [positions]);
+
+  if (!events.length) return null;
+
+  const totalMad = events.reduce((s, e) => s + e.couponAmtMad, 0);
+  const maxDays = Math.max(...events.map(e => e.daysLeft), 1);
+
+  return (
+    <div className="card slide-up stagger-4" style={{ overflow: 'hidden' }}>
+      <div style={{
+        padding: '10px 16px', borderBottom: '1px solid var(--b1)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Calendar size={13} style={{ color: 'var(--cyan)' }} />
+          <h3 style={{
+            fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem',
+            letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)',
+          }}>Calendrier des Coupons</h3>
+          <span style={{
+            fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: 'var(--tx3)',
+            padding: '2px 7px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)',
+          }}>{events.length}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.59rem', color: 'var(--tx3)' }}>
+            Prochains paiements semi-annuels
+          </span>
+          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.70rem', fontWeight: 700, color: 'var(--cyan)' }}>
+            {fMAD(totalMad, true)}{' '}
+            <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.50rem', color: 'var(--tx3)', fontWeight: 400 }}>TOTAL</span>
+          </span>
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', minWidth: 180 }}>Obligation</th>
+              <th style={{ textAlign: 'center' }}>Type</th>
+              <th style={{ textAlign: 'right' }}>Coupon</th>
+              <th style={{ textAlign: 'right' }}>Prochaine Date</th>
+              <th style={{ textAlign: 'right' }}>Jours</th>
+              <th style={{ textAlign: 'center', minWidth: 100 }}>Urgence</th>
+              <th style={{ textAlign: 'right' }}>Montant USD</th>
+              <th style={{ textAlign: 'right' }}>Montant MAD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((e, idx) => {
+              const urgent  = e.daysLeft < 30;
+              const soon    = e.daysLeft < 90;
+              const urgency = urgent ? 'var(--loss)' : soon ? 'var(--cyan)' : 'var(--profit)';
+              const barPct  = Math.max(5, 100 - (e.daysLeft / maxDays) * 100);
+              const rowBg   = urgent ? 'rgba(255,43,96,0.04)' : idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent';
+              return (
+                <tr key={e.isin} style={{ background: rowBg }}>
+                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.70rem', color: 'var(--tx1)' }} title={e.desc}>
+                    {e.desc || e.isin}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    {e.subAsset && (
+                      <span className={`badge ${
+                        (e.subAsset || '').toLowerCase().includes('ocp') ? 'badge-eb' :
+                        (e.subAsset || '').toLowerCase().includes('cln') ? 'badge-cln' :
+                        (e.subAsset || '').toLowerCase().includes('egp') ? 'badge-egp' : 'badge-eb'
+                      }`}>{e.subAsset}</span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--cyan)' }}>
+                    {e.couponRatePct}%
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--tx2)' }}>
+                    {fDateLong(e.nextDate)}
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.70rem', fontWeight: 700, color: urgency }}>
+                    {e.daysLeft}j
+                  </td>
+                  <td>
+                    <div style={{ position: 'relative', height: 5, background: 'var(--elev)', borderRadius: 3, overflow: 'hidden', margin: '0 4px' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${barPct}%`, background: urgency, borderRadius: 3, opacity: 0.75 }} />
+                    </div>
+                    {urgent && (
+                      <div style={{ textAlign: 'center', fontFamily: 'var(--f-disp)', fontSize: '0.44rem', fontWeight: 700, letterSpacing: '0.09em', color: 'var(--loss)', marginTop: 2 }}>URGENT</div>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--tx2)' }}>
+                    {fUSD(e.couponAmtUsd)}
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.70rem', fontWeight: 600, color: 'var(--cyan)' }}>
+                    {fMAD(e.couponAmtMad, true)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 };
 
@@ -326,7 +651,7 @@ const PositionRow = ({ r, idx }) => {
 const PortfolioView = () => {
   const {
     globalDashboard, dashboardRows, portfolioDuration,
-    pnlDailyHistory,
+    pnlDailyHistory, rates,
     connectionStatus, loading, refresh, selectedDate, lastUpdate,
   } = useTrading();
   const { user } = useAuth();
@@ -345,8 +670,24 @@ const PortfolioView = () => {
       return !s.includes('cln') && !s.includes('egp') && !s.includes('bill');
     }), [positions]);
 
-  const displayRows = showAll ? positions : positions.slice(0, 15);
-  const alerts      = useMemo(() => dashboardRows.filter(r => r.netDailyAlert), [dashboardRows]);
+  const groups = useMemo(() => {
+    const rows = showAll ? positions : positions.slice(0, 15);
+    const cats = [
+      { catKey: 'EUROBOND', label: 'Eurobonds', color: 'var(--eb)',   rows: [] },
+      { catKey: 'CLN',      label: 'CLN',       color: '#9B3EEF',    rows: [] },
+      { catKey: 'EGP',      label: 'EGP Bills', color: 'var(--egp)', rows: [] },
+    ];
+    rows.forEach(r => {
+      const s = (r.subAsset || '').toLowerCase();
+      if (s.includes('cln'))                             cats[1].rows.push(r);
+      else if (s.includes('egp') || s.includes('bill')) cats[2].rows.push(r);
+      else                                               cats[0].rows.push(r);
+    });
+    return cats.filter(c => c.rows.length > 0);
+  }, [positions, showAll]);
+  const DESK_TARGET = 162e6;
+
+  const alerts = useMemo(() => dashboardRows.filter(r => r.netDailyAlert), [dashboardRows]);
   const pnlEco      = parseFloat(globalDashboard?.totalPlEcoMad || 0);
   const pnlAcct     = parseFloat(globalDashboard?.totalPnlAccountingMad || 0);
   const pnlPos      = pnlEco >= 0;
@@ -354,6 +695,27 @@ const PortfolioView = () => {
   const dur         = portfolioDuration ?? globalDashboard?.portfolioDuration;
   const dv01        = parseFloat(globalDashboard?.totalDv01Usd || 0);
   const netDaily    = parseFloat(globalDashboard?.totalNetDailyMad || 0);
+
+  const forecast = useMemo(() => {
+    const now   = new Date();
+    const start = new Date(now.getFullYear(), 0, 1);
+    const end   = new Date(now.getFullYear(), 11, 31);
+    const prog  = Math.min((now - start) / (end - start), 1);
+    const tradDays   = Math.max(1, Math.round(prog * 252));
+    const remainDays = Math.max(0, 252 - tradDays);
+    const dailyPace  = pnlEco / tradDays;
+    const targetPct  = pnlEco !== 0 ? (pnlEco / DESK_TARGET) * 100 : 0;
+    return {
+      tradDays,
+      remainDays,
+      dailyPace,
+      targetPct,
+      pess:    pnlEco + dailyPace * remainDays * 0.75,
+      central: pnlEco + dailyPace * remainDays,
+      opt:     pnlEco + dailyPace * remainDays * 1.25,
+      yearProg: prog,
+    };
+  }, [pnlEco]);
 
   const donutSegs = useMemo(() => {
     if (!globalDashboard?.breakdown) return [];
@@ -395,7 +757,7 @@ const PortfolioView = () => {
     return () => window.removeEventListener('traderLimitsUpdated', onUpdate);
   }, [user?.id]);
 
-  const exposureEur  = nomUsd * 0.92;
+  const exposureEur  = nomUsd * ((rates?.eurMad || 10.72) / (rates?.usdMad || 9.251));
   const limitPct     = Math.min((exposureEur / limitEur) * 100, 110);
   const limitOver    = limitPct > 100;
 
@@ -403,37 +765,34 @@ const PortfolioView = () => {
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--void)' }}>
 
       {/* ── Page Header ── */}
-      <div style={{
-        position: 'sticky', top: 0, zIndex: 20,
-        background: 'var(--void)', borderBottom: '1px solid var(--b1)',
-        padding: '10px 20px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="view-hdr">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div>
-            <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-              Dashboard Global
-            </h2>
-            <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
-              Fixed Income · Desk International
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ display: 'inline-block', width: 2, height: 13, background: 'var(--cyan)', borderRadius: 1, flexShrink: 0 }} />
+              <h2 className="view-title">Dashboard Global</h2>
+              <div className={`badge ${connectionStatus === 'connected' ? 'badge-live' : 'badge-closed'}`} style={{ marginLeft: 2 }}>
+                {connectionStatus === 'connected'
+                  ? <><span className="live-dot" style={{ width: 4, height: 4 }} />Live</>
+                  : <><WifiOff size={9} />Offline</>}
+              </div>
+            </div>
+            <p className="view-sub" style={{ paddingLeft: 9 }}>Fixed Income · Desk International</p>
           </div>
-          <div className={`badge ${connectionStatus === 'connected' ? 'badge-live' : 'badge-closed'}`}>
-            {connectionStatus === 'connected'
-              ? <><span className="live-dot" style={{ width: 4, height: 4 }} />Live</>
-              : <><WifiOff size={10} />Offline</>}
-          </div>
-          {lastUpdate && (
-            <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: 'var(--tx3)' }}>
-              {lastUpdate.toLocaleTimeString('fr-FR')}
-            </span>
-          )}
         </div>
-        <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
-          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          Actualiser
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {lastUpdate && (
+            <span className="tag">{lastUpdate.toLocaleTimeString('fr-FR')}</span>
+          )}
+          <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
+            <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            Actualiser
+          </button>
+        </div>
       </div>
+
+      {/* ── Market Rates Strip ── */}
+      <RatesStrip rates={rates} />
 
       {loading && !dashboardRows.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 16 }}>
@@ -501,6 +860,157 @@ const PortfolioView = () => {
             />
           </div>
 
+          {/* ── KPI Row 2 — Attribution P&L ── */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <KpiCard
+              label="P&L Latent"
+              value={fMAD(globalDashboard?.totalPlLatentMad, true)}
+              sub="Mark-to-Market non réalisé"
+              topClass={parseFloat(globalDashboard?.totalPlLatentMad || 0) >= 0 ? 'kpi-top-green' : 'kpi-top-red'}
+              valueColor={pnlColor(globalDashboard?.totalPlLatentMad)}
+              animClass="slide-up stagger-1"
+            />
+            <KpiCard
+              label="P&L Réalisé"
+              value={fMAD(globalDashboard?.totalPlRealizedMad, true)}
+              sub="Cessions &amp; clôtures"
+              topClass={parseFloat(globalDashboard?.totalPlRealizedMad || 0) >= 0 ? 'kpi-top-green' : 'kpi-top-red'}
+              valueColor={pnlColor(globalDashboard?.totalPlRealizedMad)}
+              animClass="slide-up stagger-2"
+            />
+            <KpiCard
+              label="Coupons / CCY"
+              value={fMAD(globalDashboard?.totalCouponsMad, true)}
+              sub="Intérêts courus YTD"
+              topClass="kpi-top-cyan"
+              valueColor="var(--cyan)"
+              animClass="slide-up stagger-3"
+            />
+            <KpiCard
+              label="Coût Financement"
+              value={fMAD(globalDashboard?.totalFundingCostMad, true)}
+              sub="Repo &amp; carry cost"
+              topClass={parseFloat(globalDashboard?.totalFundingCostMad || 0) >= 0 ? 'kpi-top-green' : 'kpi-top-red'}
+              valueColor={pnlColor(globalDashboard?.totalFundingCostMad)}
+              animClass="slide-up stagger-4"
+            />
+            <KpiCard
+              label="Theta Coupon / j"
+              value={fMAD(globalDashboard?.totalCpnThetaMad, true)}
+              sub="Accrual journalier"
+              topClass="kpi-top-violet"
+              valueColor="#C084FC"
+              animClass="slide-up stagger-5"
+            />
+            <KpiCard
+              label="Alertes Carry"
+              value={alerts.length > 0 ? `${alerts.length} pos.` : '✓ OK'}
+              sub={alerts.length > 0 ? alerts.slice(0, 2).map(a => a.description || a.isin).join(' · ') : 'Aucune position négative'}
+              topClass={alerts.length > 0 ? 'kpi-top-red' : 'kpi-top-green'}
+              valueColor={alerts.length > 0 ? 'var(--loss)' : 'var(--profit)'}
+              icon={AlertTriangle}
+              animClass="slide-up stagger-6"
+            />
+          </div>
+
+          {/* ── Forecast 31 Déc ── */}
+          {pnlEco !== 0 && (() => {
+            const year = new Date().getFullYear();
+            const fM = (v) => { if (v == null) return '—'; const n = parseFloat(v); const a = Math.abs(n), s = n >= 0 ? '+' : '−'; if (a >= 1e6) return `${s}${(a/1e6).toFixed(1)}M`; return `${s}${a.toFixed(0)}`; };
+            const fPctShort = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+            const pessPct    = (forecast.pess    / DESK_TARGET) * 100;
+            const centralPct = (forecast.central / DESK_TARGET) * 100;
+            const optPct     = (forecast.opt     / DESK_TARGET) * 100;
+            return (
+              <div className="card" style={{ padding: '10px 14px', borderLeft: '3px solid var(--cyan)', background: 'linear-gradient(90deg, rgba(0,202,255,0.04) 0%, transparent 100%)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ flexShrink: 0 }}>
+                    <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.52rem', letterSpacing: '0.13em', textTransform: 'uppercase', color: 'var(--tx3)', marginBottom: 2 }}>
+                      Forecast 31 Déc {year}
+                    </div>
+                    <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', color: 'var(--tx3)' }}>
+                      {forecast.tradDays}j écoulés · {forecast.remainDays}j restants · Obj. {(DESK_TARGET/1e6).toFixed(0)}M MAD
+                    </div>
+                  </div>
+                  <div style={{ width: 1, height: 30, background: 'var(--b1)', flexShrink: 0 }} />
+                  {[
+                    { label: 'Pessimiste',  val: forecast.pess,    pct: pessPct,    col: 'var(--loss)'   },
+                    { label: 'Central',     val: forecast.central, pct: centralPct, col: 'var(--cyan)'   },
+                    { label: 'Optimiste',   val: forecast.opt,     pct: optPct,     col: 'var(--profit)' },
+                  ].map(s => (
+                    <div key={s.label} style={{ flexShrink: 0, padding: '4px 12px', borderRadius: 6, background: `${s.col}10`, border: `1px solid ${s.col}30`, textAlign: 'center' }}>
+                      <div style={{ fontFamily: 'var(--f-disp)', fontSize: '0.50rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: s.col, opacity: 0.85, marginBottom: 2 }}>{s.label}</div>
+                      <div style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '0.80rem', color: s.col, lineHeight: 1 }}>{fM(s.val)} MAD</div>
+                      <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.55rem', color: s.col, opacity: 0.70, marginTop: 1 }}>{fPctShort(s.pct)} obj.</div>
+                    </div>
+                  ))}
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)' }}>Réalisé {fPctShort(forecast.targetPct)} objectif</span>
+                      <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.57rem', color: 'var(--tx3)' }}>{fPctShort(forecast.yearProg * 100)} de l'année</span>
+                    </div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--elev)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(Math.abs(forecast.targetPct), 100)}%`, borderRadius: 3, background: forecast.targetPct >= forecast.yearProg * 100 ? 'var(--profit)' : 'var(--warn)', transition: 'width 0.8s ease' }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Par Classe d'Actifs ── */}
+          {globalDashboard?.breakdown && (() => {
+            const bd = globalDashboard.breakdown;
+            const classes = [
+              { key: 'EUROBOND', label: 'Eurobonds',  color: 'var(--eb)',  nominal: parseFloat(bd.EUROBOND?.nominalMad || 0), pnl: parseFloat(bd.EUROBOND?.plEcoMad || 0) },
+              { key: 'CLN',      label: 'CLN',        color: 'var(--cln)', nominal: parseFloat(bd.CLN?.nominalMad || 0),     pnl: parseFloat(bd.CLN?.plEcoMad || 0)      },
+              { key: 'EGP_BILL', label: 'EGP Bills',  color: 'var(--egp)', nominal: parseFloat(bd.EGP_BILL?.nominalMad || 0), pnl: parseFloat(bd.EGP_BILL?.plEcoMad || 0) },
+            ].filter(c => c.nominal !== 0 || c.pnl !== 0);
+            if (!classes.length) return null;
+            const totalAbs = classes.reduce((s, c) => s + Math.abs(c.pnl), 0) || 1;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.54rem', letterSpacing: '0.13em', textTransform: 'uppercase', color: 'var(--tx3)', flexShrink: 0 }}>
+                    Par Classe d'Actifs
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--b1)' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {classes.map(c => {
+                    const pos = c.pnl >= 0;
+                    const pct = (Math.abs(c.pnl) / totalAbs * 100).toFixed(0);
+                    return (
+                      <div key={c.key} className="card" style={{ flex: '1 1 180px', padding: '8px 10px', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: 2, background: c.color, display: 'inline-block', flexShrink: 0 }} />
+                            <span className="lbl" style={{ fontSize: '0.58rem' }}>{c.label}</span>
+                          </div>
+                          <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.57rem', color: 'var(--tx3)', background: 'var(--elev)', padding: '1px 5px', borderRadius: 3, border: '1px solid var(--b1)' }}>
+                            {pct}%
+                          </span>
+                        </div>
+                        <div style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.15rem', color: pos ? 'var(--profit)' : 'var(--loss)', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                          {fMAD(c.pnl, true)}
+                        </div>
+                        <div style={{ marginTop: 6, fontFamily: 'var(--f-body)', fontSize: '0.63rem', color: 'var(--tx3)' }}>
+                          {fN(c.nominal / 1e6, 1)} M MAD nominal
+                        </div>
+                        <div style={{ marginTop: 9, height: 3, background: 'var(--elev)', borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: c.color, borderRadius: 2, opacity: 0.55, transition: 'width 0.6s ease' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── G-Spread Watchlist ── */}
+          <GSpreadWatchlist positions={positions} />
+
           {/* ── Historical P&L Chart ── */}
           <div className="card" style={{ padding: '14px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -527,8 +1037,11 @@ const PortfolioView = () => {
             <PnlLineChart data={pnlDailyHistory} />
           </div>
 
+          {/* ── Coupon Calendar ── */}
+          <CouponCalendar positions={positions} />
+
           {/* ── Analytics Row ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
             {/* Donut allocation */}
             <div className="card slide-up stagger-3" style={{ padding: '16px' }}>
@@ -572,37 +1085,45 @@ const PortfolioView = () => {
                   }} />
                 </div>
               </div>
-            </div>
 
-            {/* P&L Decomposition */}
-            <div className="card slide-up stagger-4" style={{ padding: '16px' }}>
-              <p className="sect-ttl" style={{ marginBottom: 14 }}>Décomposition P&L (MAD)</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                {[
-                  ['P&L Latent',       globalDashboard?.totalPlLatentMad,       null],
-                  ['P&L Réalisé',      globalDashboard?.totalPlRealizedMad,     null],
-                  ['Coupons / CCY',    globalDashboard?.totalCouponsMad,        'var(--cyan)'],
-                  ['Coût Financement', globalDashboard?.totalFundingCostMad,    'var(--warn)'],
-                  ['Theta Coupon/j',   globalDashboard?.totalCpnThetaMad,       '#60A5FA'],
-                  ['P&L Éco ★',       globalDashboard?.totalPlEcoMad,          null],
-                ].map(([label, val, forceColor]) => (
-                  <div key={label}>
-                    <div className="lbl" style={{ marginBottom: 4 }}>{label}</div>
-                    <div style={{
-                      fontFamily: 'var(--f-mono)', fontWeight: 600, fontSize: '0.82rem',
-                      color: forceColor || pnlColor(val),
-                    }}>
-                      {fMAD(val, true)}
+              {/* P&L Attribution by asset class */}
+              {globalDashboard?.breakdown && (() => {
+                const bd = globalDashboard.breakdown;
+                const classes = [
+                  { key: 'EUROBOND', label: 'Eurobonds', color: 'var(--eb)',  pnl: parseFloat(bd.EUROBOND?.plEcoMad || 0) },
+                  { key: 'CLN',      label: 'CLN',       color: 'var(--cln)', pnl: parseFloat(bd.CLN?.plEcoMad || 0)      },
+                  { key: 'EGP_BILL', label: 'EGP Bills', color: 'var(--egp)', pnl: parseFloat(bd.EGP_BILL?.plEcoMad || 0) },
+                ].filter(c => c.pnl !== 0);
+                if (!classes.length) return null;
+                const maxAbs = Math.max(...classes.map(c => Math.abs(c.pnl)), 1);
+                return (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--b1)' }}>
+                    <span className="lbl" style={{ display: 'block', marginBottom: 8 }}>P&L Éco · Répartition</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {classes.map(c => {
+                        const pct = (Math.abs(c.pnl) / maxAbs) * 100;
+                        const pos = c.pnl >= 0;
+                        return (
+                          <div key={c.key}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <span style={{ width: 6, height: 6, borderRadius: 1, background: c.color, flexShrink: 0, display: 'inline-block' }} />
+                                <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.65rem', color: 'var(--tx3)' }}>{c.label}</span>
+                              </span>
+                              <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.68rem', fontWeight: 600, color: pos ? 'var(--profit)' : 'var(--loss)' }}>
+                                {fMAD(c.pnl, true)}
+                              </span>
+                            </div>
+                            <div style={{ height: 4, background: 'var(--elev)', borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: pos ? 'var(--profit)' : 'var(--loss)', borderRadius: 2, transition: 'width 0.6s ease' }} />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--b1)' }}>
-                <div className="lbl" style={{ marginBottom: 5 }}>Net Daily (Carry + Theta)</div>
-                <div style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '1.05rem', color: pnlColor(netDaily) }} className={pnlColor(netDaily) === 'var(--profit)' ? 'glow-profit' : 'glow-loss'}>
-                  {fMAD(netDaily, true)}
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
             {/* Risk Metrics — Arc Gauges */}
@@ -708,7 +1229,7 @@ const PortfolioView = () => {
                 <h3 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
                   Positions Live
                 </h3>
-                <span className="badge badge-live"><span className="live-dot" style={{ width: 4, height: 4 }} />SSE</span>
+                <span className="badge badge-live"><span className="live-dot" style={{ width: 4, height: 4 }} />WS</span>
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.66rem', color: 'var(--tx3)', padding: '2px 8px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)' }}>
                   {positions.length} pos.
                 </span>
@@ -731,15 +1252,20 @@ const PortfolioView = () => {
                   <tr>
                     {[
                       'ISIN', 'Obligation', 'Type', 'Nominal M',
-                      'WAP Dirty', 'Prix Mkt', 'Perf WAP',
-                      'P&L Éco', 'Net Daily', 'Dur.', 'DV01 $',
+                      'Coupon %', 'Échéance', 'WAP Dirty', 'Prix Mkt', 'Perf WAP',
+                      'G-Spread', 'P&L Éco', 'Net Daily', 'Dur.', 'DV01 $', 'Signal',
                     ].map((h, i) => (
-                      <th key={h} style={{ textAlign: i >= 3 ? 'right' : i === 2 ? 'center' : 'left' }}>{h}</th>
+                      <th key={h} style={{ textAlign: i === 14 ? 'center' : i >= 3 ? 'right' : i === 2 ? 'center' : 'left' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {displayRows.map((r, idx) => <PositionRow key={r.isin} r={r} idx={idx} />)}
+                  {groups.map(g => (
+                    <React.Fragment key={g.catKey}>
+                      <CatRow {...g} totalPnl={pnlEco} />
+                      {g.rows.map((r, idx) => <PositionRow key={r.isin} r={r} idx={idx} />)}
+                    </React.Fragment>
+                  ))}
                 </tbody>
                 {positions.length > 0 && (
                   <tfoot>
@@ -751,11 +1277,13 @@ const PortfolioView = () => {
                         {fN(positions.reduce((s, r) => s + parseFloat(r.netNominal || 0), 0) / 1e6, 1)}
                         <span style={{ color: 'var(--tx3)', fontSize: '0.60rem', marginLeft: 2 }}>M</span>
                       </td>
-                      <td colSpan={3} />
+                      <td colSpan={5} />
+                      <td />
                       <td style={{ color: pnlColor(pnlEco), fontWeight: 700 }}>{fMAD(pnlEco, true)}</td>
                       <td style={{ color: pnlColor(netDaily), fontWeight: 600 }}>{fMAD(netDaily, true)}</td>
                       <td />
                       <td style={{ color: '#60A5FA' }}>{fN(dv01, 0)}</td>
+                      <td />
                     </tr>
                   </tfoot>
                 )}

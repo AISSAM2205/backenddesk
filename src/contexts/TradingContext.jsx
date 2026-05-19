@@ -11,9 +11,48 @@
 
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 import api, { today } from '../services/api';
-import sseService from '../services/sseService';
+import wsService from '../services/wsService';
 
 const TradingContext = createContext();
+
+/* ─── Client-side carry enrichment ──────────────────────────────
+   Si le backend renvoie cpnThetaMad / dailyFundingMad = 0,
+   on les calcule : CpnTheta = coupon%/365 × nominal × FX
+                    DailyFunding = SOFR|ESTR/360 × nominal × FX
+──────────────────────────────────────────────────────────────── */
+function enrichCarry(rows, ratesData) {
+  const n    = v => parseFloat(v ?? 0);
+  const usdMad  = n(ratesData?.usdMad)  || 9.251;
+  const eurMad  = n(ratesData?.eurMad)  || 10.418;
+  const sofr    = n(ratesData?.sofr)    || 4.30;
+  const estr    = n(ratesData?.estr)    || 2.17;
+
+  return rows.map(r => {
+    const isEur   = (r.currency || '').toUpperCase() === 'EUR';
+    const fx       = isEur ? eurMad : usdMad;
+    const fundRate = isEur ? estr   : sofr;
+    const nominal  = n(r.netNominal) * 1e6;   // netNominal stocké en millions
+
+    let cpnThetaMad    = n(r.cpnThetaMad);
+    let dailyFundingMad = n(r.dailyFundingMad);
+    let fundingCostMad  = n(r.fundingCostMad);
+
+    if (cpnThetaMad === 0 && n(r.couponRate) > 0 && nominal > 0) {
+      cpnThetaMad = (n(r.couponRate) / 100 * nominal / 365) * fx;
+    }
+    if (dailyFundingMad === 0 && nominal > 0) {
+      dailyFundingMad = (fundRate / 100 * nominal / 360) * fx;
+    }
+    if (fundingCostMad === 0 && dailyFundingMad > 0) {
+      fundingCostMad = dailyFundingMad;
+    }
+
+    const netDailyMad = cpnThetaMad - dailyFundingMad;
+    const netDailyAlert = netDailyMad < 0;
+
+    return { ...r, cpnThetaMad, dailyFundingMad, fundingCostMad, netDailyMad, netDailyAlert };
+  });
+}
 
 /* ─── Client-side computation of GlobalDashboard ─────────────────
    Called when /api/dashboard/global returns 404.
@@ -151,7 +190,9 @@ export const TradingProvider = ({ children }) => {
         ]);
 
       // ── Dashboard rows (source of truth) ────────────────────────
-      const rows = dashRes.status === 'fulfilled' ? (dashRes.value.data || []) : [];
+      const rawRows = dashRes.status === 'fulfilled' ? (dashRes.value.data || []) : [];
+      const ratesData = ratesRes.status === 'fulfilled' ? ratesRes.value.data : null;
+      const rows = enrichCarry(rawRows, ratesData);
       dispatch({ type: 'SET_DASHBOARD_ROWS', payload: rows });
 
       // ── Global dashboard: real endpoint OR compute from rows ─────
@@ -162,8 +203,8 @@ export const TradingProvider = ({ children }) => {
       }
 
       // ── Market rates (optional, UI adapts gracefully) ────────────
-      if (ratesRes.status === 'fulfilled') {
-        dispatch({ type: 'SET_RATES', payload: ratesRes.value.data });
+      if (ratesData) {
+        dispatch({ type: 'SET_RATES', payload: ratesData });
       }
 
       // ── Risk metrics ─────────────────────────────────────────────
@@ -222,11 +263,11 @@ export const TradingProvider = ({ children }) => {
     }
   }, []);
 
-  // Initial load + SSE subscription
+  // Initial load + WebSocket subscription
   useEffect(() => {
     loadAll(state.selectedDate);
 
-    const unsub = sseService.subscribe(event => {
+    const unsub = wsService.subscribe(event => {
       if (event.type === 'CONNECTION_STATUS') {
         dispatch({ type: 'SET_CONNECTION_STATUS', payload: event.status });
       } else if (event.type === 'DATA') {
@@ -234,8 +275,8 @@ export const TradingProvider = ({ children }) => {
       }
     });
 
-    sseService.connect();
-    return () => { unsub(); sseService.disconnect(); };
+    wsService.connect();
+    return () => { unsub(); wsService.disconnect(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

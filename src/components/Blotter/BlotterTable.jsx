@@ -3,6 +3,7 @@ import api from '../../services/api';
 import {
   Search, RefreshCw, X, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Plus, Trash2, TrendingUp, Activity,
+  Upload, CheckCircle, FileText,
 } from 'lucide-react';
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -386,54 +387,88 @@ const BlotterTable = () => {
       {cancelTrade && <CancelModal trade={cancelTrade} onClose={() => setCancelTrade(null)} onSuccess={onModalSuccess} />}
 
       {/* ── Header ── */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--void)', borderBottom: '1px solid var(--b1)', padding: '10px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--void)', borderBottom: '1px solid var(--b1)' }}>
+        {/* Title row */}
+        <div style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
-            <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-              Trade Blotter
-            </h2>
-            <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', marginTop: 2 }}>
-              {sorted.length} trade{sorted.length !== 1 ? 's' : ''} · {trades.filter(t => !t.isClosed).length} actifs
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ display: 'inline-block', width: 2, height: 13, background: 'var(--profit)', borderRadius: 1, flexShrink: 0 }} />
+              <h2 className="view-title">Trade Blotter</h2>
+              <span className="tag" style={{ marginLeft: 2 }}>{sorted.length} trades · {trades.filter(t => !t.isClosed).length} actifs</span>
+            </div>
+            <p className="view-sub" style={{ paddingLeft: 9 }}>Saisie · Historique · Import CSV</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button onClick={() => setShowBond(true)} className="btn btn-primary btn-sm">
-              <Plus size={11} />Bond
+              <Plus size={10} />Bond
             </button>
             <button onClick={() => setShowFut(true)} className="btn btn-ghost btn-sm" style={{ borderColor: 'rgba(20,188,164,0.35)', color: 'var(--fut)' }}>
-              <TrendingUp size={11} />Future
+              <TrendingUp size={10} />Future
             </button>
             <button onClick={fetchTrades} disabled={loading} className="btn btn-ghost btn-sm">
-              <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+              <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             </button>
           </div>
         </div>
 
-        {/* Filters */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Filter row */}
+        <div style={{ padding: '5px 16px 7px', display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid var(--b0)', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
-            <Search size={12} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx3)', pointerEvents: 'none' }} />
+            <Search size={11} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx3)', pointerEvents: 'none' }} />
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="ISIN, description, contrepartie…"
-              style={{ background: 'var(--surf)', border: '1px solid var(--b1)', borderRadius: 6, padding: '5px 10px 5px 28px', color: 'var(--tx1)', fontFamily: 'var(--f-body)', fontSize: '0.72rem', outline: 'none', width: 230 }}
+              style={{ background: 'var(--surf)', border: '1px solid var(--b1)', borderRadius: 4, padding: '4px 9px 4px 26px', color: 'var(--tx1)', fontFamily: 'var(--f-body)', fontSize: '0.70rem', outline: 'none', width: 210 }}
             />
           </div>
           {['ALL', 'BUY', 'SELL'].map(w => (
-            <button key={w} onClick={() => setWay(w)} className={`badge ${filterWay === w ? (w === 'BUY' ? 'badge-buy' : w === 'SELL' ? 'badge-sell' : 'badge-live') : 'badge-closed'}`} style={{ cursor: 'pointer', border: 'none', fontSize: '0.60rem', padding: '3px 9px' }}>
+            <button key={w} onClick={() => setWay(w)}
+              style={{
+                padding: '2px 7px', borderRadius: 3, cursor: 'pointer',
+                fontFamily: 'var(--f-disp)', fontSize: '0.57rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: filterWay === w ? (w === 'BUY' ? 'rgba(30,127,255,0.18)' : w === 'SELL' ? 'rgba(255,43,96,0.15)' : 'rgba(200,145,12,0.15)') : 'transparent',
+                color: filterWay === w ? (w === 'BUY' ? '#60A5FA' : w === 'SELL' ? 'var(--loss)' : 'var(--cyan)') : 'var(--tx3)',
+                border: `1px solid ${filterWay === w ? (w === 'BUY' ? 'rgba(30,127,255,0.30)' : w === 'SELL' ? 'rgba(255,43,96,0.28)' : 'rgba(200,145,12,0.28)') : 'var(--b1)'}`,
+                transition: 'all 0.12s',
+              }}>
               {w === 'ALL' ? 'Tous' : w}
             </button>
           ))}
-          <select value={filterSub} onChange={e => setSub(e.target.value)} className="select">
+          <select value={filterSub} onChange={e => setSub(e.target.value)} className="select" style={{ borderRadius: 3, height: 24 }}>
             <option value="ALL">Tous actifs</option>
             {subAssets.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select value={filterStatus} onChange={e => setStatus(e.target.value)} className="select">
+          <select value={filterStatus} onChange={e => setStatus(e.target.value)} className="select" style={{ borderRadius: 3, height: 24 }}>
             <option value="ALL">Tous statuts</option>
             <option value="ACTIF">Actifs</option>
             <option value="ANNULE">Annulés</option>
           </select>
         </div>
       </div>
+
+      {/* ── Summary Strip ── */}
+      {trades.length > 0 && (
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: 'var(--surf)' }}>
+          {[
+            { label: 'Actifs',   value: trades.filter(t => !t.isClosed).length,                                              col: 'var(--profit)' },
+            { label: 'Annulés',  value: trades.filter(t => t.isClosed).length,                                               col: 'var(--tx3)'   },
+            { label: 'BUY',      value: trades.filter(t => !t.isClosed && (t.way||'').toUpperCase() === 'BUY').length,       col: '#60A5FA'      },
+            { label: 'SELL',     value: trades.filter(t => !t.isClosed && (t.way||'').toUpperCase() === 'SELL').length,      col: 'var(--loss)'  },
+            { label: 'Bonds',    value: trades.filter(t => !(t.subAsset||'').toLowerCase().includes('future') && !t.isClosed).length, col: 'var(--cyan)'  },
+            { label: 'Futures',  value: trades.filter(t => (t.subAsset||'').toLowerCase().includes('future') && !t.isClosed).length,  col: 'var(--fut)'   },
+          ].map(({ label, value, col }) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span style={{ fontFamily: 'var(--f-mono)', fontWeight: 700, fontSize: '0.82rem', color: col, lineHeight: 1 }}>{value}</span>
+              <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.54rem', fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)' }}>{label}</span>
+            </div>
+          ))}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <FileText size={11} style={{ color: 'var(--tx3)' }} />
+            <button onClick={() => setShowCsv(true)} className="btn btn-ghost btn-sm" style={{ fontSize: '0.62rem', padding: '3px 8px', gap: 4 }}>
+              <Upload size={10} />Import CSV
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error */}
       {error && (

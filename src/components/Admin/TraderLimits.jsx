@@ -1,6 +1,7 @@
 // src/components/Admin/TraderLimits.jsx
 import React, { useState } from 'react';
 import { useAdmin } from '../../contexts/AdminContext';
+import { useToast } from '../Common/Toast';
 import { Edit, Save, X, User, AlertTriangle, Shield } from 'lucide-react';
 
 /* ─── Semi-circle gauge (same math as PortfolioView) ─────────────── */
@@ -53,15 +54,18 @@ const DEFAULT_LIMITS = {
 
 const TraderLimits = () => {
   const { traders, updateTraderLimits } = useAdmin();
-  const [editing, setEditing] = useState(null);
-  const [form,    setForm]    = useState({});
-  const [saving,  setSaving]  = useState(false);
+  const { toast } = useToast();
+  const [editing,   setEditing]   = useState(null);
+  const [form,      setForm]      = useState({});
+  const [saving,    setSaving]    = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const openEdit = (t) => {
     setEditing(t.id);
+    setSaveError(null);
     setForm(JSON.parse(JSON.stringify(t.limits || DEFAULT_LIMITS)));
   };
-  const cancel = () => { setEditing(null); setForm({}); };
+  const cancel = () => { setEditing(null); setForm({}); setSaveError(null); };
 
   const setLimitField = (inst, field, value) => setForm(prev => ({
     ...prev,
@@ -70,8 +74,18 @@ const TraderLimits = () => {
 
   const save = async () => {
     setSaving(true);
-    try { await updateTraderLimits(editing, form); cancel(); }
-    finally { setSaving(false); }
+    setSaveError(null);
+    try {
+      await updateTraderLimits(editing, form);
+      toast('Limites sauvegardées avec succès', 'success');
+      cancel();
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.message || 'Erreur lors de la sauvegarde';
+      setSaveError(msg);
+      toast(msg, 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const pct = (used, limit) => limit > 0 ? Math.min((used / limit) * 100, 110) : 0;
@@ -130,14 +144,21 @@ const TraderLimits = () => {
                   </div>
                 </div>
                 {isEditing ? (
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={cancel} className="btn btn-ghost btn-sm"><X size={12} />Annuler</button>
-                    <button onClick={save} disabled={saving} className="btn btn-primary btn-sm">
-                      {saving
-                        ? <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                        : <Save size={12} />}
-                      Sauvegarder
-                    </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={cancel} className="btn btn-ghost btn-sm"><X size={12} />Annuler</button>
+                      <button onClick={save} disabled={saving} className="btn btn-primary btn-sm">
+                        {saving
+                          ? <div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                          : <Save size={12} />}
+                        Sauvegarder
+                      </button>
+                    </div>
+                    {saveError && editing === t.id && (
+                      <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--loss)' }}>
+                        {saveError}
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <button onClick={() => openEdit(t)} className="btn btn-ghost btn-sm">

@@ -6,6 +6,7 @@ import { TradingProvider } from './contexts/TradingContext';
 import ErrorBoundary from './components/Common/ErrorBoundary';
 import LoadingSpinner from './components/Common/LoadingSpinner';
 import { ThemeProvider } from './contexts/ThemeContext';
+import ToastProvider from './components/Common/Toast';
 
 // Lazy-load main views
 const LoginForm       = React.lazy(() => import('./components/Auth/LoginForm'));
@@ -132,11 +133,13 @@ function App() {
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        <AuthProvider>
-          <Router>
-            <AppRoutes />
-          </Router>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <Router>
+              <AppRoutes />
+            </Router>
+          </AuthProvider>
+        </ToastProvider>
       </ErrorBoundary>
     </ThemeProvider>
   );

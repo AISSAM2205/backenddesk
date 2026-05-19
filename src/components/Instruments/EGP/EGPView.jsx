@@ -1,6 +1,91 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useTrading } from '../../../contexts/TradingContext';
-import { Coins, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { useAuth } from '../../../contexts/AuthContext';
+import { Coins, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown, Calendar, AlertTriangle, TrendingUp } from 'lucide-react';
+
+/* ─── NDF Forward Curve (mini SVG chart) ────────────────────────── */
+const NDF_TENORS = [
+  { label: '1M',  days: 30  },
+  { label: '2M',  days: 60  },
+  { label: '3M',  days: 90  },
+  { label: '6M',  days: 180 },
+  { label: '9M',  days: 270 },
+  { label: '12M', days: 360 },
+];
+
+const NdfCurvePanel = ({ rates }) => {
+  const egpRate  = parseFloat(rates?.egpOvernightRate || 27.25) / 100;  // CBE overnight
+  const usdRate  = parseFloat(rates?.sofr || 5.30) / 100;               // SOFR
+  const spot     = parseFloat(rates?.usdEgp || 50.85);                   // USD/EGP spot
+
+  const points = NDF_TENORS.map(({ label, days }) => ({
+    label,
+    fwd: spot * (1 + egpRate * days / 360) / (1 + usdRate * days / 360),
+  }));
+
+  const minFwd = Math.min(...points.map(p => p.fwd));
+  const maxFwd = Math.max(...points.map(p => p.fwd));
+  const range  = maxFwd - minFwd || 1;
+
+  const W = 280, H = 80, PAD = { l: 8, r: 8, t: 10, b: 20 };
+  const xStep = (W - PAD.l - PAD.r) / (points.length - 1);
+  const toY   = (v) => PAD.t + (1 - (v - minFwd) / range) * (H - PAD.t - PAD.b);
+  const path  = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${PAD.l + i * xStep},${toY(p.fwd).toFixed(1)}`).join(' ');
+  const areaPath = `${path} L ${PAD.l + (points.length - 1) * xStep},${H - PAD.b} L ${PAD.l},${H - PAD.b} Z`;
+
+  return (
+    <div className="card slide-up stagger-3" style={{ padding: '14px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <TrendingUp size={12} style={{ color: '#FCD34D' }} />
+        <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.64rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+          Courbe NDF EGP/USD — Forward Implicite
+        </span>
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.58rem', color: 'var(--tx3)', marginLeft: 'auto' }}>
+          Spot {spot.toFixed(2)} · CBE {(egpRate * 100).toFixed(2)}% · SOFR {(usdRate * 100).toFixed(2)}%
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        {/* SVG chart */}
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: W, height: H, flexShrink: 0 }}>
+          <defs>
+            <linearGradient id="ndf-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#FCD34D" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#FCD34D" stopOpacity="0.03" />
+            </linearGradient>
+          </defs>
+          {/* Area fill */}
+          <path d={areaPath} fill="url(#ndf-grad)" />
+          {/* Line */}
+          <path d={path} fill="none" stroke="#FCD34D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Points + labels */}
+          {points.map((p, i) => (
+            <g key={p.label}>
+              <circle cx={PAD.l + i * xStep} cy={toY(p.fwd)} r="2.5" fill="#FCD34D" />
+              <text x={PAD.l + i * xStep} y={H - 5} textAnchor="middle" fill="var(--tx3)" fontSize="7.5" fontFamily="Syne,sans-serif">
+                {p.label}
+              </text>
+            </g>
+          ))}
+        </svg>
+        {/* Data table */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {points.map(p => (
+            <div key={p.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--tx3)', textTransform: 'uppercase' }}>{p.label}</span>
+              <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: '#FCD34D', fontWeight: 600 }}>{p.fwd.toFixed(4)}</span>
+              <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.58rem', color: 'var(--tx3)' }}>
+                {(((p.fwd - spot) / spot) * 100).toFixed(2)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)', marginTop: 8, opacity: 0.65 }}>
+        Fwd = Spot × (1 + r_EGP × t/360) / (1 + r_USD × t/360). Taux CBE/SOFR en vigueur.
+      </p>
+    </div>
+  );
+};
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
 const fN  = (v, d = 2) => { if (v == null) return '—'; const n = parseFloat(v); if (isNaN(n)) return '—'; return n.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }); };
@@ -9,15 +94,105 @@ const fUSD = (v) => { if (v == null) return '—'; const n = parseFloat(v); if (
 const fMat = (d) => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); } catch { return d; } };
 const pnlColor = (v) => parseFloat(v || 0) >= 0 ? 'var(--profit)' : 'var(--loss)';
 
+/* ─── Maturity Ladder ────────────────────────────────────────────── */
+const BUCKETS = [
+  { label: '0–3M',   maxDays: 90  },
+  { label: '3–6M',   maxDays: 180 },
+  { label: '6–9M',   maxDays: 270 },
+  { label: '9–12M',  maxDays: 365 },
+  { label: '> 12M',  maxDays: Infinity },
+];
+
+const MaturityLadder = ({ positions }) => {
+  const today = new Date();
+  const buckets = BUCKETS.map(b => ({ ...b, items: [], nominalUsd: 0, plEcoMad: 0 }));
+  (positions || []).forEach(r => {
+    if (!r.maturityDate) return;
+    const days = Math.round((new Date(r.maturityDate) - today) / 86400000);
+    const b = buckets.find(bk => days <= bk.maxDays);
+    if (b) {
+      b.items.push(r);
+      b.nominalUsd += parseFloat(r.nominalUsd || 0);
+      b.plEcoMad   += parseFloat(r.plEcoMad   || 0);
+    }
+  });
+  const maxNom = Math.max(...buckets.map(b => b.nominalUsd), 1);
+  if (!positions?.length) return null;
+  return (
+    <div className="card slide-up stagger-2" style={{ padding: '14px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <Calendar size={12} style={{ color: '#FCD34D' }} />
+        <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.64rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+          Échéancier — Profil de Maturité
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 80 }}>
+        {buckets.map(b => {
+          const pct = maxNom > 0 ? (b.nominalUsd / maxNom) * 100 : 0;
+          const hasItems = b.items.length > 0;
+          const pnlPos = b.plEcoMad >= 0;
+          return (
+            <div key={b.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, height: '100%', justifyContent: 'flex-end' }}>
+              {hasItems && (
+                <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.58rem', color: pnlPos ? 'var(--profit)' : 'var(--loss)', fontWeight: 600 }}>
+                  {b.nominalUsd >= 1e6 ? `${(b.nominalUsd / 1e6).toFixed(0)}M` : `${(b.nominalUsd / 1e3).toFixed(0)}k`}
+                </div>
+              )}
+              <div style={{
+                width: '100%', height: `${Math.max(pct, hasItems ? 6 : 2)}%`, minHeight: hasItems ? 8 : 3,
+                background: hasItems
+                  ? `linear-gradient(to top, rgba(232,154,32,0.80), rgba(232,154,32,0.30))`
+                  : 'var(--b1)',
+                borderRadius: '4px 4px 0 0',
+                border: hasItems ? '1px solid rgba(232,154,32,0.40)' : 'none',
+                borderBottom: 'none',
+                transition: 'height 0.7s cubic-bezier(0.34,1.56,0.64,1)',
+              }} />
+              <div style={{ width: '100%', height: 1, background: 'var(--b1)' }} />
+              <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.52rem', letterSpacing: '0.07em', textTransform: 'uppercase', color: hasItems ? '#FCD34D' : 'var(--tx3)', textAlign: 'center' }}>
+                {b.label}
+              </div>
+              <div style={{ fontFamily: 'var(--f-mono)', fontSize: '0.53rem', color: 'var(--tx3)', textAlign: 'center' }}>
+                {hasItems ? `${b.items.length} pos.` : '—'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const SortIcon = ({ active, dir }) => {
   if (!active) return <ChevronsUpDown size={10} style={{ opacity: 0.25, marginLeft: 3 }} />;
   return dir === 'asc' ? <ChevronUp size={10} style={{ color: 'var(--cyan)', marginLeft: 3 }} /> : <ChevronDown size={10} style={{ color: 'var(--cyan)', marginLeft: 3 }} />;
 };
 
+const EGP_SL_KEY = (uid) => `egp_stoploss_${uid || 'default'}`;
+
 const EGPView = () => {
-  const { egpList, loading, refresh, selectedDate } = useTrading();
+  const { egpList, rates, loading, refresh, selectedDate } = useTrading();
+  const { user } = useAuth();
   const [sortKey, setSortKey] = useState('maturityDate');
   const [sortDir, setSortDir] = useState('asc');
+  const [stopLoss,    setStopLoss]    = useState(0);
+  const [slInput,     setSlInput]     = useState('');
+  const [showSlInput, setShowSlInput] = useState(false);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(EGP_SL_KEY(user?.id));
+    const val = raw ? parseFloat(raw) : 0;
+    if (!isNaN(val) && val > 0) { setStopLoss(val); setSlInput(String(val / 1e6)); }
+  }, [user?.id]);
+
+  const saveStopLoss = () => {
+    const val = parseFloat(slInput) * 1e6;
+    if (!isNaN(val) && val >= 0) {
+      setStopLoss(val);
+      localStorage.setItem(EGP_SL_KEY(user?.id), String(val));
+      setShowSlInput(false);
+    }
+  };
 
   const handleSort = (k) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -54,24 +229,22 @@ const EGPView = () => {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--void)' }}>
-      <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--void)', borderBottom: '1px solid var(--b1)', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div className="view-hdr">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Coins size={14} style={{ color: '#FCD34D' }} />
-            <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-              EGP Bills — Bons du Trésor Égypte
-            </h2>
-            <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.60rem', color: 'var(--tx3)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(232,154,32,0.3)', background: 'rgba(232,154,32,0.06)' }}>
-              Desk Trésorerie · Ext.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ display: 'inline-block', width: 2, height: 13, background: 'var(--egp)', borderRadius: 1, flexShrink: 0 }} />
+            <h2 className="view-title">EGP Bills — Bons du Trésor Égypte</h2>
+            <span className="tag" style={{ marginLeft: 2, color: '#FCD34D', borderColor: 'rgba(232,154,32,0.3)', background: 'rgba(232,154,32,0.06)' }}>
+              Trésorerie Ext.
             </span>
           </div>
-          <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', marginTop: 2 }}>
+          <p className="view-sub" style={{ paddingLeft: 9 }}>
             {egpList.length} position{egpList.length !== 1 ? 's' : ''}
-            {snapshotDate && <span style={{ marginLeft: 8, color: 'rgba(156,163,175,0.5)' }}>snapshot {snapshotDate}</span>}
+            {snapshotDate && <span style={{ marginLeft: 8, color: 'var(--tx3)' }}>snapshot {snapshotDate}</span>}
           </p>
         </div>
         <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
-          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
         </button>
       </div>
 
@@ -80,19 +253,174 @@ const EGPView = () => {
         {/* KPI Row */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            ['P&L Économique (MAD)', fMAD(totals.plEcoMad),      pnlColor(totals.plEcoMad),      totals.plEcoMad >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['P&L Réalisé (USD)',    fUSD(totals.plRealizedUsd),  pnlColor(totals.plRealizedUsd), totals.plRealizedUsd >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['P&L Latent (USD)',     fUSD(totals.plLatentUsd),    pnlColor(totals.plLatentUsd),   totals.plLatentUsd >= 0 ? 'kpi-top-green' : 'kpi-top-red'],
-            ['Nominal Total (USD)',  `${fN(totals.nominalUsd / 1e6, 0)} M`, 'var(--tx1)',         'kpi-top-warn'],
-            ['Financement (USD)',    fUSD(totals.fundingUsd),     'var(--warn)',                   'kpi-top-warn'],
-            ['Nb Positions',         egpList.length.toString(),   '#FCD34D',                      'kpi-top-warn'],
-          ].map(([label, value, valColor, topClass]) => (
-            <div key={label} className={`card ${topClass}`} style={{ flex: '1 1 140px', padding: '13px 15px' }}>
-              <div className="lbl" style={{ marginBottom: 8 }}>{label}</div>
-              <div className="n" style={{ fontSize: '1.15rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.02em' }}>{value}</div>
+            ['P&L Économique (MAD)', fMAD(totals.plEcoMad),      pnlColor(totals.plEcoMad)],
+            ['P&L Réalisé (USD)',    fUSD(totals.plRealizedUsd),  pnlColor(totals.plRealizedUsd)],
+            ['P&L Latent (USD)',     fUSD(totals.plLatentUsd),    pnlColor(totals.plLatentUsd)],
+            ['Nominal Total (USD)',  `${fN(totals.nominalUsd / 1e6, 0)} M`, 'var(--tx1)'],
+            ['Financement (USD)',    fUSD(totals.fundingUsd),     'var(--warn)'],
+            ['Nb Positions',         egpList.length.toString(),   '#FCD34D'],
+          ].map(([label, value, valColor]) => (
+            <div key={label} className="card" style={{ flex: '1 1 130px', padding: '8px 10px' }}>
+              <div className="lbl" style={{ marginBottom: 5, fontSize: '0.53rem', letterSpacing: '0.12em' }}>{label}</div>
+              <div className="n" style={{ fontSize: '1.10rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.02em' }}>{value}</div>
             </div>
           ))}
         </div>
+
+        {/* ── Stop-Loss Banner ── */}
+        {stopLoss > 0 && totals.plEcoMad < -stopLoss && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px', borderRadius: 8, background: 'rgba(255,43,96,0.10)', border: '1px solid rgba(255,43,96,0.35)', animation: 'pulse-live 2s ease infinite' }}>
+            <AlertTriangle size={14} style={{ color: 'var(--loss)', flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <p style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--loss)', marginBottom: 4 }}>
+                ⚠ STOP-LOSS EGP DÉCLENCHÉ
+              </p>
+              <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.72rem', color: '#FC8FA0' }}>
+                P&L Éco {fMAD(totals.plEcoMad)} MAD — Limite : −{(stopLoss / 1e6).toFixed(1)}M MAD
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Stop-Loss Config ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.60rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--tx3)' }}>
+            Stop-Loss EGP :
+          </span>
+          {showSlInput ? (
+            <>
+              <input type="number" value={slInput} onChange={e => setSlInput(e.target.value)} placeholder="ex: 5 (M MAD)"
+                className="field" style={{ width: 120, padding: '3px 8px', fontSize: '0.72rem', marginBottom: 0 }}
+                onKeyDown={e => { if (e.key === 'Enter') saveStopLoss(); if (e.key === 'Escape') setShowSlInput(false); }}
+                autoFocus />
+              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.60rem', color: 'var(--tx3)' }}>M MAD</span>
+              <button onClick={saveStopLoss} className="btn btn-primary btn-sm" style={{ padding: '3px 10px' }}>OK</button>
+              <button onClick={() => setShowSlInput(false)} className="btn btn-ghost btn-sm" style={{ padding: '3px 8px' }}>×</button>
+            </>
+          ) : (
+            <>
+              <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.68rem', fontWeight: 600, color: stopLoss > 0 ? 'var(--loss)' : 'var(--tx3)' }}>
+                {stopLoss > 0 ? `−${(stopLoss / 1e6).toFixed(1)}M MAD` : '— Non configuré'}
+              </span>
+              <button onClick={() => { setSlInput(stopLoss > 0 ? String(stopLoss / 1e6) : ''); setShowSlInput(true); }} className="btn btn-ghost btn-sm" style={{ fontSize: '0.60rem', padding: '2px 7px' }}>
+                Configurer
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* ── FX Breakeven Panel ── */}
+        {egpList.length > 0 && (() => {
+          const spot     = parseFloat(rates?.usdEgp  || 50.85);
+          const sofr     = parseFloat(rates?.sofr    || 5.30) / 100;
+          const today    = new Date();
+
+          const deals = sorted.map(r => {
+            const yieldRate   = parseFloat(r.couponRate || 0) < 1
+              ? parseFloat(r.couponRate || 0)
+              : parseFloat(r.couponRate || 0) / 100;
+            const daysRem     = r.maturityDate
+              ? Math.max(0, Math.round((new Date(r.maturityDate) - today) / 86400000))
+              : 90;
+            const fxEntry     = parseFloat(r.fxEntry || r.wapFxEntry || 0) || (spot * 0.97);
+            const bkvSansFin  = fxEntry * (1 + yieldRate * daysRem / 360);
+            const netCarry    = yieldRate - sofr;
+            const bkvAvecFin  = fxEntry * (1 + netCarry * daysRem / 360);
+            const cushionSans = ((bkvSansFin - spot) / spot) * 100;
+            const cushionAvec = ((bkvAvecFin - spot) / spot) * 100;
+            const plFxApprox  = (spot - fxEntry) * parseFloat(r.nominalUsd || 0) * parseFloat(rates?.usdMad || 9.251) / spot;
+            return { ...r, fxEntry, bkvSansFin, bkvAvecFin, cushionSans, cushionAvec, daysRem, yieldRate, plFxApprox };
+          });
+
+          return (
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertTriangle size={12} style={{ color: '#FCD34D' }} />
+                <span style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.65rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+                  FX Breakeven — Seuils de Rentabilité par Deal
+                </span>
+                <span style={{ marginLeft: 'auto', fontFamily: 'var(--f-mono)', fontSize: '0.58rem', color: 'var(--tx3)', padding: '2px 7px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)' }}>
+                  Spot USD/EGP : {spot.toFixed(2)} · SOFR : {(sofr * 100).toFixed(2)}%
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--thead-bg)' }}>
+                      {[
+                        ['ISIN', false],
+                        ['Échéance / Jours', false],
+                        ['Nominal M USD', true],
+                        ['Rendement %', true],
+                        ['FX Entrée (mock)', true],
+                        ['BKV s/fin', true],
+                        ['BKV a/fin', true],
+                        ['Coussin s/fin', true],
+                        ['Coussin a/fin', true],
+                        ['P&L FX approx.', true],
+                      ].map(([h, right]) => (
+                        <th key={h} style={{ padding: '8px 12px', fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.54rem', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--tx3)', borderBottom: '1px solid var(--b1)', textAlign: right ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deals.map((d, i) => {
+                      const rowBg  = i % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent';
+                      const safe   = d.cushionSans > 5;
+                      const warn   = d.cushionSans > 0 && d.cushionSans <= 5;
+                      const broken = d.cushionSans <= 0;
+                      const cushCol = broken ? 'var(--loss)' : warn ? 'var(--warn)' : 'var(--profit)';
+                      const tdS = { padding: '8px 12px', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', borderBottom: '1px solid var(--b0)', whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
+                      return (
+                        <tr key={d.isin + i} style={{ background: rowBg }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--tr-hover-bg)'}
+                          onMouseLeave={e => e.currentTarget.style.background = rowBg}>
+                          <td style={{ ...tdS, textAlign: 'left', color: '#FCD34D', fontWeight: 500 }}>{d.isin}</td>
+                          <td style={{ ...tdS, textAlign: 'left', color: 'var(--tx2)' }}>
+                            {fMat(d.maturityDate)}
+                            <span style={{ color: 'var(--tx3)', fontSize: '0.58rem', marginLeft: 5 }}>{d.daysRem}j</span>
+                          </td>
+                          <td style={{ ...tdS }}>{fN(parseFloat(d.nominalUsd || 0) / 1e6, 1)}</td>
+                          <td style={{ ...tdS, color: '#FCD34D' }}>{(d.yieldRate * 100).toFixed(2)}%</td>
+                          <td style={{ ...tdS, color: 'var(--tx3)' }}>
+                            {d.fxEntry.toFixed(2)}
+                            <span style={{ fontSize: '0.52rem', color: 'var(--tx3)', marginLeft: 3 }}>mock</span>
+                          </td>
+                          <td style={{ ...tdS, color: 'var(--cyan)' }}>{d.bkvSansFin.toFixed(2)}</td>
+                          <td style={{ ...tdS, color: 'var(--eb)' }}>{d.bkvAvecFin.toFixed(2)}</td>
+                          <td style={{ ...tdS, color: cushCol, fontWeight: 700 }}>
+                            {d.cushionSans >= 0 ? '+' : ''}{d.cushionSans.toFixed(1)}%
+                            {broken && <span style={{ marginLeft: 4, fontSize: '0.56rem' }}>⚠</span>}
+                          </td>
+                          <td style={{ ...tdS, color: d.cushionAvec >= 0 ? 'var(--profit)' : 'var(--loss)' }}>
+                            {d.cushionAvec >= 0 ? '+' : ''}{d.cushionAvec.toFixed(1)}%
+                          </td>
+                          <td style={{ ...tdS, color: d.plFxApprox >= 0 ? 'var(--profit)' : 'var(--loss)', fontWeight: 600 }}>
+                            {fMAD(d.plFxApprox)} MAD
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: '8px 14px', borderTop: '1px solid var(--b0)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.57rem', color: 'var(--tx3)' }}>
+                  BKV s/fin = FX_entrée × (1 + yield × jours/360) · BKV a/fin = FX_entrée × (1 + (yield − SOFR) × jours/360)
+                </span>
+                <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.54rem', fontWeight: 700, color: 'rgba(232,154,32,0.70)', letterSpacing: '0.07em', marginLeft: 'auto' }}>
+                  ⚡ FX entrée = mock −3% · Connexion Bloomberg requise pour données réelles
+                </span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── NDF Forward Curve ── */}
+        <NdfCurvePanel rates={rates} />
+
+        {/* Maturity Ladder */}
+        <MaturityLadder positions={egpList} />
 
         {/* Table */}
         <div className="card" style={{ overflow: 'hidden' }}>

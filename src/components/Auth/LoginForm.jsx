@@ -1,284 +1,415 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { Eye, EyeOff, Lock, AlertCircle, User, ArrowRight, Activity, Shield } from 'lucide-react';
+import { Eye, EyeOff, Lock, AlertCircle, User, ArrowRight } from 'lucide-react';
+import bgImage from '../../assets/login-bg.png';
 
-const FEATURES = [
-  ['Dashboard P&L Global', 'Économique · Comptable · Daily'],
-  ['Market Watch Bloomberg', '28 colonnes · Pricing live SSE'],
-  ['Risk & Analytics', 'DV01 · Duration · Signaux Hedge'],
-  ['Trade Blotter', 'Import CSV · Historique complet'],
-];
+/* ── Design tokens — contraste WCAG AA garanti ── */
+const T = {
+  bg0:   '#060A10',
+  card:  '#0D1725',
+  bd:    'rgba(255,255,255,0.09)',
+  bdFoc: 'rgba(14,165,233,0.55)',
+  tx1:   '#F1F5F9',   /* primary — blanc */
+  tx2:   '#94A3B8',   /* secondary — slate-400 */
+  tx3:   '#64748B',   /* muted — slate-500  */
+  acc:   '#0EA5E9',   /* sky-500 */
+  accH:  '#0284C7',   /* sky-600 */
+  ok:    '#10B981',   /* emerald-500 */
+  err:   '#F43F5E',   /* rose-500 */
+};
 
 const LoginForm = () => {
   const { login, loading, error, clearError, loginAsAdmin, loginAsTrader } = useAuth();
-  const [form, setForm] = useState({ username: '', password: '' });
+  const [form,    setForm]    = useState({ username: '', password: '' });
   const [showPwd, setShowPwd] = useState(false);
+  const [time,    setTime]    = useState(new Date());
 
   useEffect(() => {
-    if (!document.getElementById('__login-spin')) {
-      const s = document.createElement('style');
-      s.id = '__login-spin';
-      s.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-      document.head.appendChild(s);
-    }
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
   }, []);
 
-  const onChange = (e) => {
+  useEffect(() => {
+    if (document.getElementById('__lf-css')) return;
+    const s = document.createElement('style');
+    s.id = '__lf-css';
+    s.textContent = `
+      @keyframes __lf-spin { to { transform: rotate(360deg); } }
+      @keyframes __lf-fade { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+      .__lf-card { animation: __lf-fade 0.45s cubic-bezier(0.22,1,0.36,1) both; }
+
+      .__lf-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .__lf-input {
+        width: 100%; box-sizing: border-box;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 5px;
+        padding: 10px 36px 10px 36px;
+        color: ${T.tx1};
+        font-family: 'DM Sans', system-ui, sans-serif;
+        font-size: 0.85rem;
+        outline: none;
+        transition: border-color 0.15s, background 0.15s;
+        -webkit-appearance: none;
+      }
+      .__lf-input::placeholder { color: ${T.tx3}; }
+      .__lf-input:hover { border-color: rgba(255,255,255,0.18); }
+      .__lf-input:focus {
+        border-color: ${T.acc};
+        background: rgba(14,165,233,0.05);
+      }
+
+      .__lf-btn {
+        width: 100%;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+        padding: 12px 20px;
+        background: ${T.acc};
+        color: #fff;
+        border: none; border-radius: 5px;
+        font-family: 'DM Sans', system-ui, sans-serif;
+        font-size: 0.85rem; font-weight: 600;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition: background 0.15s, box-shadow 0.15s, transform 0.10s;
+        outline: none;
+      }
+      .__lf-btn:hover:not(:disabled) {
+        background: ${T.accH};
+        box-shadow: 0 4px 20px rgba(14,165,233,0.30);
+      }
+      .__lf-btn:active:not(:disabled) { transform: scale(0.985); }
+      .__lf-btn:disabled {
+        background: rgba(14,165,233,0.20);
+        color: rgba(255,255,255,0.35);
+        cursor: not-allowed;
+      }
+
+      .__lf-ghost {
+        flex: 1; padding: 8px 10px;
+        background: rgba(255,255,255,0.04);
+        color: ${T.tx2};
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 4px;
+        font-family: 'DM Sans', system-ui, sans-serif;
+        font-size: 0.75rem; font-weight: 500;
+        cursor: pointer;
+        transition: background 0.12s, border-color 0.12s, color 0.12s;
+        outline: none;
+      }
+      .__lf-ghost:hover {
+        background: rgba(255,255,255,0.08);
+        border-color: rgba(255,255,255,0.16);
+        color: ${T.tx1};
+      }
+
+      .__lf-icon {
+        position: absolute;
+        top: 50%; transform: translateY(-50%);
+        pointer-events: none;
+        display: flex; align-items: center;
+      }
+
+      .__lf-eye {
+        position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; cursor: pointer;
+        color: ${T.tx3}; display: flex; align-items: center; padding: 2px;
+        transition: color 0.12s; outline: none;
+      }
+      .__lf-eye:hover { color: ${T.tx2}; }
+
+      .__lf-label {
+        font-family: 'DM Sans', system-ui, sans-serif;
+        font-size: 0.72rem; font-weight: 600;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        color: ${T.tx2};
+        margin-bottom: 7px;
+        display: block;
+      }
+    `;
+    document.head.appendChild(s);
+  }, []);
+
+  const onChange = e => {
     setForm(p => ({ ...p, [e.target.name]: e.target.value }));
     if (error) clearError();
   };
 
-  const onSubmit = async (e) => {
+  const onSubmit = async e => {
     e.preventDefault();
     try { await login(form.username, form.password); } catch (_) {}
   };
 
+  const timeStr = time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const dateStr = time.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--void)' }}>
+    <div style={{
+      minHeight: '100vh',
+      background: T.bg0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+      padding: '24px 16px',
+    }}>
 
-      {/* ── LEFT PANEL — Branding ── */}
+      {/* ── Background image ── */}
       <div style={{
-        display: 'none',
-        position: 'relative',
-        flexDirection: 'column',
-        background: 'linear-gradient(145deg, #050F1E 0%, #091F38 60%, #081829 100%)',
-        borderRight: '1px solid var(--b1)',
-      }} className="lg:flex lg:w-[44%]">
+        position: 'fixed', inset: 0, zIndex: 0,
+        backgroundImage: `url(${bgImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        filter: 'brightness(0.30) saturate(0.60)',
+        transform: 'scale(1.05)',
+      }} />
 
-        {/* Grid texture */}
-        <div style={{
-          position: 'absolute', inset: 0, opacity: 0.5,
-          backgroundImage: 'linear-gradient(var(--b0) 1px, transparent 1px), linear-gradient(90deg, var(--b0) 1px, transparent 1px)',
-          backgroundSize: '44px 44px',
-          pointerEvents: 'none',
-        }} />
-
-        {/* Ambient glows */}
-        <div style={{
-          position: 'absolute', top: '28%', left: '18%',
-          width: 320, height: 320, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(0,202,255,0.04) 0%, transparent 65%)',
-          pointerEvents: 'none',
-        }} />
-        <div style={{
-          position: 'absolute', bottom: '22%', right: '12%',
-          width: 220, height: 220, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(0,232,153,0.03) 0%, transparent 65%)',
-          pointerEvents: 'none',
-        }} />
-
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: '3rem 3.5rem' }}>
-
-          {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img src="/attijariwafa-logo.png" alt="Attijariwafa Bank" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
-            <div>
-              <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-                Attijariwafa Bank
-              </div>
-              <div style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                Fixed Income — Desk International
-              </div>
-            </div>
-          </div>
-
-          {/* Main content */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-
-            {/* Status chip */}
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '6px 14px', borderRadius: 999, marginBottom: '2rem',
-              background: 'rgba(0,232,153,0.08)',
-              border: '1px solid rgba(0,232,153,0.20)',
-              width: 'fit-content',
-            }}>
-              <span className="live-dot" />
-              <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--profit)' }}>
-                Système Opérationnel
-              </span>
-            </div>
-
-            {/* Headline */}
-            <h1 style={{
-              fontFamily: 'var(--f-disp)', fontWeight: 800,
-              fontSize: '2.5rem', lineHeight: 1.12,
-              color: 'var(--tx1)', marginBottom: '1.25rem',
-            }}>
-              International<br />
-              <span style={{ color: 'var(--cyan)' }} className="glow-cyan">Trading</span> Desk
-            </h1>
-
-            <p style={{
-              fontFamily: 'var(--f-body)', fontSize: '0.84rem',
-              color: 'var(--tx2)', lineHeight: 1.75, maxWidth: 320, marginBottom: '2.5rem',
-            }}>
-              Plateforme institutionnelle de gestion de portefeuille obligataire.
-              Eurobonds · CLN · EGP Bills · Futures.
-            </p>
-
-            {/* Features */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {FEATURES.map(([title, sub]) => (
-                <div key={title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <div style={{
-                    width: 5, height: 5, borderRadius: '50%',
-                    background: 'var(--cyan)', flexShrink: 0, marginTop: 6,
-                  }} />
-                  <div>
-                    <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 600, fontSize: '0.74rem', color: 'var(--tx1)', letterSpacing: '0.03em' }}>
-                      {title}
-                    </div>
-                    <div style={{ fontFamily: 'var(--f-body)', fontSize: '0.70rem', color: 'var(--tx3)', marginTop: 2 }}>
-                      {sub}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', color: 'var(--tx3)' }}>
-              © 2025 Attijariwafa Bank — Confidentiel
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Activity size={11} style={{ color: 'var(--tx3)' }} />
-              <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.60rem', color: 'var(--tx3)' }}>v2.1.0</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── RIGHT PANEL — Login Form ── */}
+      {/* ── Uniform dark overlay ── */}
       <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        padding: '2rem', background: 'var(--base)',
+        position: 'fixed', inset: 0, zIndex: 1,
+        background: 'rgba(6,10,16,0.72)',
+      }} />
+
+      {/* ══════════ CARD ══════════ */}
+      <div className="__lf-card" style={{
+        position: 'relative', zIndex: 10,
+        width: '100%',
+        maxWidth: 400,
+        background: T.card,
+        borderRadius: 8,
+        border: `1px solid rgba(255,255,255,0.08)`,
+        borderTop: `2px solid ${T.acc}`,
+        padding: '36px 36px 30px',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.65), 0 4px 24px rgba(14,165,233,0.08)',
       }}>
-        <div style={{ width: '100%', maxWidth: 380 }} className="slide-up">
 
-          {/* Mobile logo */}
-          <div className="lg:hidden" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '2.5rem' }}>
-            <img src="/attijariwafa-logo.png" alt="" style={{ height: 32, width: 'auto' }} />
+        {/* ── Header: logo + clock ── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 30,
+          paddingBottom: 20,
+          borderBottom: `1px solid rgba(255,255,255,0.07)`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <img
+              src="/attijariwafa-logo.png"
+              alt="AWB"
+              style={{ height: 24, width: 'auto', objectFit: 'contain' }}
+            />
+            <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.12)', flexShrink: 0 }} />
             <div>
-              <div style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.78rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
-                Attijariwafa Bank
-              </div>
-              <div style={{ fontFamily: 'var(--f-body)', fontSize: '0.64rem', color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <div style={{
+                fontFamily: 'var(--f-disp)', fontSize: '0.60rem', fontWeight: 700,
+                letterSpacing: '0.13em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.80)',
+              }}>
                 Fixed Income
               </div>
+              <div style={{
+                fontFamily: 'var(--f-disp)', fontSize: '0.52rem', fontWeight: 500,
+                letterSpacing: '0.10em', textTransform: 'uppercase',
+                color: 'rgba(255,255,255,0.42)',
+                marginTop: 1,
+              }}>
+                Desk International
+              </div>
             </div>
           </div>
 
-          {/* Icon */}
-          <div style={{
-            width: 46, height: 46, borderRadius: 12, marginBottom: '1.5rem',
-            background: 'rgba(0,202,255,0.10)',
-            border: '1px solid rgba(0,202,255,0.22)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Shield size={22} style={{ color: 'var(--cyan)' }} />
-          </div>
-
-          {/* Header */}
-          <div style={{ marginBottom: '1.75rem' }}>
-            <h2 style={{ fontFamily: 'var(--f-disp)', fontWeight: 800, fontSize: '1.55rem', color: 'var(--tx1)', marginBottom: '0.4rem', lineHeight: 1.2 }}>
-              Connexion
-            </h2>
-            <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.82rem', color: 'var(--tx2)' }}>
-              Accès réservé aux utilisateurs autorisés
-            </p>
-          </div>
-
-          {/* Error banner */}
-          {error && (
+          <div style={{ textAlign: 'right' }}>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '10px 14px', borderRadius: 8, marginBottom: 20,
-              background: 'rgba(255,43,96,0.10)', border: '1px solid rgba(255,43,96,0.28)',
+              fontFamily: 'var(--f-mono)', fontSize: '0.85rem', fontWeight: 700,
+              color: T.tx1, letterSpacing: '0.04em', lineHeight: 1,
             }}>
-              <AlertCircle size={14} style={{ color: 'var(--loss)', flexShrink: 0 }} />
-              <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.78rem', color: 'var(--loss)' }}>{error}</span>
+              {timeStr}
             </div>
-          )}
-
-          {/* Form */}
-          <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-            <div>
-              <label className="lbl" style={{ display: 'block', marginBottom: 7 }}>Identifiant</label>
-              <div style={{ position: 'relative' }}>
-                <User size={14} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx3)', pointerEvents: 'none' }} />
-                <input
-                  className="field"
-                  style={{ paddingLeft: 36, fontFamily: 'var(--f-mono)', fontSize: '0.84rem' }}
-                  name="username" value={form.username} onChange={onChange}
-                  placeholder="nom.prenom" autoComplete="username" required
-                />
-              </div>
+            <div style={{
+              fontFamily: 'var(--f-mono)', fontSize: '0.57rem',
+              color: T.tx3, marginTop: 4,
+              letterSpacing: '0.02em',
+            }}>
+              {dateStr}
             </div>
+          </div>
+        </div>
 
-            <div>
-              <label className="lbl" style={{ display: 'block', marginBottom: 7 }}>Mot de passe</label>
-              <div style={{ position: 'relative' }}>
-                <Lock size={14} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--tx3)', pointerEvents: 'none' }} />
-                <input
-                  className="field"
-                  style={{ paddingLeft: 36, paddingRight: 42, fontFamily: 'var(--f-mono)', letterSpacing: '0.12em', fontSize: '0.84rem' }}
-                  name="password" type={showPwd ? 'text' : 'password'}
-                  value={form.password} onChange={onChange}
-                  placeholder="••••••••" autoComplete="current-password" required
-                />
-                <button type="button" onClick={() => setShowPwd(p => !p)} style={{
-                  position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--tx3)', display: 'flex', alignItems: 'center', padding: 0,
-                }}>
-                  {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
+        {/* ── Title ── */}
+        <div style={{ marginBottom: 24 }}>
+          <h1 style={{
+            fontFamily: 'var(--f-disp)', fontWeight: 700,
+            fontSize: '1.40rem', color: T.tx1,
+            letterSpacing: '-0.02em', lineHeight: 1.2,
+            margin: 0, marginBottom: 6,
+          }}>
+            Connexion
+          </h1>
+          <p style={{
+            fontFamily: 'var(--f-body)', fontSize: '0.78rem',
+            color: T.tx2, margin: 0, lineHeight: 1.5,
+          }}>
+            Accès réservé aux utilisateurs autorisés
+          </p>
+        </div>
+
+        {/* ── Status strip ── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '7px 11px',
+          background: 'rgba(16,185,129,0.06)',
+          border: '1px solid rgba(16,185,129,0.18)',
+          borderRadius: 4,
+          marginBottom: 24,
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: T.ok, flexShrink: 0,
+            boxShadow: `0 0 6px ${T.ok}`,
+          }} />
+          <span style={{
+            fontFamily: 'var(--f-mono)', fontSize: '0.60rem',
+            color: 'rgba(16,185,129,0.85)', letterSpacing: '0.06em', fontWeight: 600,
+          }}>
+            SYSTÈME OPÉRATIONNEL
+          </span>
+          <span style={{
+            marginLeft: 'auto', fontFamily: 'var(--f-mono)',
+            fontSize: '0.57rem', color: T.tx3, fontWeight: 500,
+          }}>
+            v2.1.0
+          </span>
+        </div>
+
+        {/* ── Error ── */}
+        {error && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 9,
+            padding: '10px 12px', borderRadius: 4, marginBottom: 18,
+            background: 'rgba(244,63,94,0.08)',
+            border: '1px solid rgba(244,63,94,0.25)',
+          }}>
+            <AlertCircle size={13} style={{ color: T.err, flexShrink: 0, marginTop: 1 }} />
+            <span style={{
+              fontFamily: 'var(--f-body)', fontSize: '0.78rem',
+              color: '#FCA5A5', lineHeight: 1.45,
+            }}>
+              {error}
+            </span>
+          </div>
+        )}
+
+        {/* ── Form ── */}
+        <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Username */}
+          <div>
+            <label className="__lf-label">Identifiant</label>
+            <div style={{ position: 'relative' }}>
+              <span className="__lf-icon" style={{ left: 11, color: T.tx3 }}>
+                <User size={13} />
+              </span>
+              <input
+                className="__lf-input"
+                name="username"
+                value={form.username}
+                onChange={onChange}
+                placeholder="nom.prenom"
+                autoComplete="username"
+                required
+              />
             </div>
+          </div>
 
-            <button type="submit" disabled={loading} className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center', padding: '12px 16px', marginTop: 4, fontSize: '0.72rem' }}>
-              {loading ? (
-                <>
-                  <span style={{
-                    width: 14, height: 14,
-                    border: '2px solid rgba(0,0,0,0.25)',
-                    borderTop: '2px solid var(--void)',
-                    borderRadius: '50%',
-                    display: 'inline-block',
-                    animation: 'spin 0.8s linear infinite',
-                  }} />
-                  Authentification…
-                </>
-              ) : (
-                <>Se connecter <ArrowRight size={14} /></>
-              )}
-            </button>
-          </form>
-
-          {/* Dev quick access */}
-          <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--b1)' }}>
-            <p className="lbl" style={{ textAlign: 'center', marginBottom: 10 }}>Accès rapide — développement</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <button onClick={loginAsTrader} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center' }}>
-                Trader
-              </button>
-              <button onClick={loginAsAdmin} className="btn btn-ghost btn-sm" style={{ justifyContent: 'center' }}>
-                Admin
+          {/* Password */}
+          <div>
+            <label className="__lf-label">Mot de passe</label>
+            <div style={{ position: 'relative' }}>
+              <span className="__lf-icon" style={{ left: 11, color: T.tx3 }}>
+                <Lock size={13} />
+              </span>
+              <input
+                className="__lf-input"
+                name="password"
+                type={showPwd ? 'text' : 'password'}
+                value={form.password}
+                onChange={onChange}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                required
+              />
+              <button type="button" className="__lf-eye" onClick={() => setShowPwd(p => !p)} tabIndex={-1}>
+                {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
           </div>
 
+          {/* Submit */}
+          <button type="submit" disabled={loading} className="__lf-btn" style={{ marginTop: 4 }}>
+            {loading ? (
+              <>
+                <span style={{
+                  width: 13, height: 13, flexShrink: 0,
+                  border: '2px solid rgba(255,255,255,0.20)',
+                  borderTopColor: '#fff',
+                  borderRadius: '50%',
+                  animation: '__lf-spin 0.75s linear infinite',
+                }} />
+                Authentification en cours…
+              </>
+            ) : (
+              <>Se connecter <ArrowRight size={14} /></>
+            )}
+          </button>
+        </form>
+
+        {/* ── Dev shortcuts ── */}
+        <div style={{ marginTop: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.07)' }} />
+            <span style={{
+              fontFamily: 'var(--f-mono)', fontSize: '0.54rem',
+              color: T.tx3, letterSpacing: '0.10em', textTransform: 'uppercase',
+            }}>
+              Accès rapide
+            </span>
+            <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.07)' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={loginAsTrader} className="__lf-ghost">Trader</button>
+            <button onClick={loginAsAdmin}  className="__lf-ghost">Admin</button>
+          </div>
         </div>
+
       </div>
+
+      {/* ── Footer ── */}
+      <div style={{
+        position: 'relative', zIndex: 10,
+        marginTop: 24,
+        display: 'flex', gap: 16, alignItems: 'center',
+      }}>
+        <span style={{
+          fontFamily: 'var(--f-mono)', fontSize: '0.56rem',
+          color: T.tx3, letterSpacing: '0.02em',
+        }}>
+          © 2025 Attijariwafa Bank · Usage interne · Confidentiel
+        </span>
+        <span style={{ width: 1, height: 10, background: 'rgba(255,255,255,0.15)' }} />
+        <span style={{
+          fontFamily: 'var(--f-mono)', fontSize: '0.56rem',
+          color: T.tx3, letterSpacing: '0.02em',
+        }}>
+          TLS 1.3 · SOC 2
+        </span>
+      </div>
+
     </div>
   );
 };
 
 export default LoginForm;
-

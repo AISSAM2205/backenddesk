@@ -11,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -40,6 +41,26 @@ public class CsvImportService {
 
     // Format de date utilisé dans le CSV (ex: "15/03/2024")
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
+    // ── Indices des colonnes du Blotter Excel exporté en CSV (0-based) ──────
+    // Blotter Excel colonnes : A-G = données techniques, H(7)=IsClosed, I(8)=AssetClass,
+    // J(9)=SubAsset, L(11)=TradeDate, M(12)=ValueDate, N(13)=ISIN, P(15)=Way,
+    // Q(16)=Nominal, R(17)=Ctp, S(18)=CleanPrice, T(19)=Accrued,
+    // Y(24)=P&LRéal, Z(25)=GSpread, AD(29)=BondDesc, AE(30)=LastPrice
+    private static final int COL_IS_CLOSED   =  7;
+    private static final int COL_SUB_ASSET   =  9;
+    private static final int COL_TRADE_DATE  = 11;
+    private static final int COL_VALUE_DATE  = 12;
+    private static final int COL_ISIN        = 13;
+    private static final int COL_WAY         = 15;
+    private static final int COL_NOMINAL     = 16;
+    private static final int COL_COUNTERPARTY= 17;
+    private static final int COL_CLEAN_PRICE = 18;
+    private static final int COL_ACCRUED     = 19;
+    private static final int COL_PNL_REAL    = 24;
+    private static final int COL_G_SPREAD    = 25;
+    private static final int COL_BOND_DESC   = 29;
+    private static final int COL_LAST_PRICE  = 30;
 
     /**
      * Table de correspondance : description du bond dans le CSV → son code ISIN.
@@ -84,8 +105,10 @@ public class CsvImportService {
         List<String> erreurs = new ArrayList<>();
 
         // 2. Ouvrir et lire le fichier CSV
+        // Excel exporte en Windows-1252 par défaut — on essaie UTF-8 d'abord (BOM), sinon CP1252
+        Charset charset = detecterEncodage(file);
         try (CSVReader reader = new CSVReader(
-                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+                new InputStreamReader(file.getInputStream(), charset))) {
 
             reader.readNext(); // ignorer la 1ère ligne (en-tête du CSV)
 
@@ -192,75 +215,58 @@ public class CsvImportService {
 
     /**
      * Convertit un tableau de colonnes CSV en objet Trade.
-     * Les indices des colonnes correspondent à la structure du Blotter Excel.
-     *
-     * Colonnes importantes :
-     *   [0]  ISIN ou ticker
-     *   [1]  Date de trade
-     *   [2]  Date de valeur
-     *   [3]  Sens (BUY / SELL)
-     *   [4]  Nominal
-     *   [5]  Prix clean (ou prix d'entrée pour les futures)
-     *   [6]  Couru (accrued interest) — bonds uniquement
-     *   [9]  G-Spread
-     *   [10] Contrepartie
-     *   [13] isClosed
-     *   [14] WAP Dirty (si déjà calculé dans Excel)
-     *   [16] P&L réalisé (si déjà calculé dans Excel)
-     *   [17] Sous-catégorie ("R Futures" ou "Mor Bond" etc.)
-     *   [19] Description du bond couvert (pour les futures)
-     *   [20] Dernier prix (lastPrice, pour les futures)
+     * Les indices correspondent à l'export brut du Blotter Excel (voir constantes COL_*).
      */
     private Trade construireTrade(String[] c) {
-        boolean cEstUnFuture = c.length > 17 && "R Futures".equals(c[17].trim());
-        BigDecimal nominal   = new BigDecimal(c[4].trim()).abs();
+        String subAsset     = estVide(c, COL_SUB_ASSET) ? "Mor Bond" : c[COL_SUB_ASSET].trim();
+        boolean cEstUnFuture = "R Futures".equals(subAsset);
+        BigDecimal nominal   = new BigDecimal(c[COL_NOMINAL].trim()).abs();
+        String isin          = c[COL_ISIN].trim();
 
-        // Champs communs à tous les trades
         Trade.TradeBuilder builder = Trade.builder()
-                .tradeDate(   LocalDate.parse(c[1].trim(), DATE_FORMAT))
-                .valueDate(   estVide(c, 2) ? null : LocalDate.parse(c[2].trim(), DATE_FORMAT))
-                .way(         c[3].trim().toUpperCase())   // "BUY" ou "SELL"
+                .tradeDate(   LocalDate.parse(c[COL_TRADE_DATE].trim(), DATE_FORMAT))
+                .valueDate(   estVide(c, COL_VALUE_DATE)   ? null : LocalDate.parse(c[COL_VALUE_DATE].trim(), DATE_FORMAT))
+                .way(         c[COL_WAY].trim().toUpperCase())
                 .nominal(     nominal)
-                .gSpread(     estVide(c, 9)  ? null : new BigDecimal(c[9].trim()))
-                .counterparty(estVide(c, 10) ? null : c[10].trim())
-                .subAsset(    c.length > 17  ? c[17].trim() : (cEstUnFuture ? "R Futures" : "Mor Bond"))
-                .isClosed(    c.length > 13  && Boolean.parseBoolean(c[13].trim()));
+                .gSpread(     estVide(c, COL_G_SPREAD)     ? null : parseDecimal(c[COL_G_SPREAD]))
+                .counterparty(estVide(c, COL_COUNTERPARTY) ? null : c[COL_COUNTERPARTY].trim())
+                .subAsset(    subAsset)
+                .isClosed(    !estVide(c, COL_IS_CLOSED) && Boolean.parseBoolean(c[COL_IS_CLOSED].trim()));
 
         if (!cEstUnFuture) {
-            // ── Champs spécifiques à un BOND ──────────────────────────────
-            BigDecimal prixClean = new BigDecimal(c[5].trim());
-            BigDecimal couru     = estVide(c, 6) ? ZERO : new BigDecimal(c[6].trim());
+            // ── BOND ──────────────────────────────────────────────────────
+            BigDecimal prixClean = new BigDecimal(c[COL_CLEAN_PRICE].trim());
+            BigDecimal couru     = estVide(c, COL_ACCRUED) ? ZERO : parseDecimal(c[COL_ACCRUED]);
 
-            builder.assetIdentifier(c[0].trim())
-                    .cleanPrice( prixClean)
-                    .accrued(    couru)
-                    .dirtyPrice( prixClean.add(couru)) // Dirty = Clean + Couru
-                    .bondInstrument(instrRepo.findById(c[0].trim()).orElse(null));
+            builder.assetIdentifier(isin)
+                    .cleanPrice(  prixClean)
+                    .accrued(     couru)
+                    .dirtyPrice(  prixClean.add(couru))
+                    .bondInstrument(instrRepo.findById(isin).orElse(null));
 
-            // WAP et P&L déjà présents dans le CSV (colonnes Excel) → on les lit
-            if (!estVide(c, 14)) builder.wapDirty(   new BigDecimal(c[14].trim()));
-            if (!estVide(c, 16)) builder.realizedPnl( new BigDecimal(c[16].trim()));
+            if (!estVide(c, COL_PNL_REAL)) builder.realizedPnl(parseDecimal(c[COL_PNL_REAL]));
 
         } else {
-            // ── Champs spécifiques à un FUTURE ────────────────────────────
-            builder.assetIdentifier(c[0].trim())      // ticker ex: "FVH5 Comdty"
-                    .cleanPrice(  new BigDecimal(c[5].trim())) // prix d'entrée
+            // ── FUTURE ────────────────────────────────────────────────────
+            builder.assetIdentifier(isin)
+                    .cleanPrice(  new BigDecimal(c[COL_CLEAN_PRICE].trim()))
                     .nbContracts( nominal.intValue())
-                    .contractSize(new BigDecimal("100000"));   // taille standard US Treasury
+                    .contractSize(new BigDecimal("100000"));
 
-            // Lier ce future au bond qu'il couvre (colonne 19 = description du bond)
-            if (!estVide(c, 19)) {
-                String isinBondCouvert = DESC_TO_ISIN.get(c[19].trim());
-                builder.hedBondIsin(isinBondCouvert);
+            if (!estVide(c, COL_BOND_DESC)) {
+                builder.hedBondIsin(DESC_TO_ISIN.get(c[COL_BOND_DESC].trim()));
             }
-
-            // Dernier prix de marché (pour calculer le MtM PnL)
-            if (!estVide(c, 20)) {
-                builder.lastPrice(new BigDecimal(c[20].trim()));
+            if (!estVide(c, COL_LAST_PRICE)) {
+                builder.lastPrice(parseDecimal(c[COL_LAST_PRICE]));
             }
         }
 
         return builder.build();
+    }
+
+    /** Parse un nombre qui peut contenir des espaces ou virgules décimales françaises. */
+    private BigDecimal parseDecimal(String raw) {
+        return new BigDecimal(raw.trim().replace(",", ".").replace(" ", ""));
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -298,5 +304,20 @@ public class CsvImportService {
         return colonnes.length <= index
                 || colonnes[index] == null
                 || colonnes[index].isBlank();
+    }
+
+    /**
+     * Détecte l'encodage du fichier CSV.
+     * Excel 2016+ exporte en UTF-8 avec BOM (EF BB BF) ; les versions anciennes en Windows-1252.
+     */
+    private Charset detecterEncodage(MultipartFile file) {
+        try {
+            byte[] bom = file.getInputStream().readNBytes(3);
+            if (bom.length >= 3 && bom[0] == (byte)0xEF && bom[1] == (byte)0xBB && bom[2] == (byte)0xBF) {
+                return StandardCharsets.UTF_8;
+            }
+        } catch (Exception ignored) {}
+        // Windows-1252 (encodage par défaut d'Excel français)
+        return Charset.forName("windows-1252");
     }
 }

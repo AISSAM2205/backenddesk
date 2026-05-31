@@ -6,13 +6,25 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+import { ConfigProvider } from "antd";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AdminProvider } from "./contexts/AdminContext";
 import { TradingProvider } from "./contexts/TradingContext";
 import ErrorBoundary from "./components/Common/ErrorBoundary";
 import LoadingSpinner from "./components/Common/LoadingSpinner";
-import { ThemeProvider } from "./contexts/ThemeContext";
+import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import ToastProvider from "./components/Common/Toast";
+import { darkTheme, lightTheme } from "./styles/theme";
+
+// Bridges ThemeContext → antd ConfigProvider so antd components follow the app theme toggle
+const AntdConfigBridge = ({ children }) => {
+  const { isDark } = useTheme();
+  return (
+    <ConfigProvider theme={isDark ? darkTheme : lightTheme}>
+      {children}
+    </ConfigProvider>
+  );
+};
 
 // Lazy-load main views
 const LoginForm = React.lazy(() => import("./components/Auth/LoginForm"));
@@ -190,15 +202,17 @@ const AppRoutes = () => {
 function App() {
   return (
     <ThemeProvider>
-      <ErrorBoundary>
-        <ToastProvider>
-          <AuthProvider>
-            <Router>
-              <AppRoutes />
-            </Router>
-          </AuthProvider>
-        </ToastProvider>
-      </ErrorBoundary>
+      <AntdConfigBridge>
+        <ErrorBoundary>
+          <ToastProvider>
+            <AuthProvider>
+              <Router>
+                <AppRoutes />
+              </Router>
+            </AuthProvider>
+          </ToastProvider>
+        </ErrorBoundary>
+      </AntdConfigBridge>
     </ThemeProvider>
   );
 }

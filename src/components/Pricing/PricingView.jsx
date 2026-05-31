@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import {
   RefreshCw,
@@ -385,18 +386,12 @@ const PricingView = () => {
               width: 200,
             }}
           />
-          <button
+          <Button
+            size="small"
+            loading={loading}
             onClick={refresh}
-            disabled={loading}
-            className="btn btn-ghost btn-sm"
-          >
-            <RefreshCw
-              size={12}
-              style={{
-                animation: loading ? "spin 1s linear infinite" : "none",
-              }}
-            />
-          </button>
+            icon={<RefreshCw size={12} />}
+          />
         </div>
       </div>
 

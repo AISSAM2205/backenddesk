@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useAuth } from "../../../contexts/AuthContext";
 import {
@@ -514,16 +515,12 @@ const EGPView = () => {
             )}
           </p>
         </div>
-        <button
+        <Button
+          size="small"
+          loading={loading}
           onClick={refresh}
-          disabled={loading}
-          className="btn btn-ghost btn-sm"
-        >
-          <RefreshCw
-            size={10}
-            style={{ animation: loading ? "spin 1s linear infinite" : "none" }}
-          />
-        </button>
+          icon={<RefreshCw size={10} />}
+        />
       </div>
 
       <div
@@ -680,20 +677,19 @@ const EGPView = () => {
               >
                 M MAD
               </span>
-              <button
+              <Button
+                type="primary"
+                size="small"
                 onClick={saveStopLoss}
-                className="btn btn-primary btn-sm"
-                style={{ padding: "3px 10px" }}
               >
                 OK
-              </button>
-              <button
+              </Button>
+              <Button
+                size="small"
                 onClick={() => setShowSlInput(false)}
-                className="btn btn-ghost btn-sm"
-                style={{ padding: "3px 8px" }}
               >
                 ×
-              </button>
+              </Button>
             </>
           ) : (
             <>
@@ -709,16 +705,15 @@ const EGPView = () => {
                   ? `−${(stopLoss / 1e6).toFixed(1)}M MAD`
                   : "— Non configuré"}
               </span>
-              <button
+              <Button
+                size="small"
                 onClick={() => {
                   setSlInput(stopLoss > 0 ? String(stopLoss / 1e6) : "");
                   setShowSlInput(true);
                 }}
-                className="btn btn-ghost btn-sm"
-                style={{ fontSize: "0.60rem", padding: "2px 7px" }}
               >
                 Configurer
-              </button>
+              </Button>
             </>
           )}
         </div>

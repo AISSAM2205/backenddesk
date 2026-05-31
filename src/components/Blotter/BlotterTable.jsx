@@ -5,6 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
+import { Button } from "antd";
 import api from "../../services/api";
 import {
   Search,
@@ -129,18 +130,13 @@ const Modal = ({ title, onClose, children }) => (
         >
           {title}
         </span>
-        <button
+        <Button
+          type="text"
+          size="small"
           onClick={onClose}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--tx3)",
-            padding: 4,
-          }}
-        >
-          <X size={16} />
-        </button>
+          icon={<X size={16} />}
+          style={{ color: "var(--tx3)" }}
+        />
       </div>
       {children}
     </div>
@@ -248,13 +244,13 @@ const CsvModal = ({ onClose, onSuccess }) => {
               {result.errorCount} ligne(s) en erreur
             </p>
           )}
-          <button
+          <Button
+            size="small"
             onClick={onClose}
-            className="btn btn-ghost btn-sm"
-            style={{ marginTop: 16, display: "inline-flex" }}
+            style={{ marginTop: 16 }}
           >
             Fermer
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -336,16 +332,18 @@ const CsvModal = ({ onClose, onSuccess }) => {
             </div>
           )}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={onClose} className="btn btn-ghost btn-sm">
+            <Button size="small" onClick={onClose}>
               Annuler
-            </button>
-            <button
+            </Button>
+            <Button
+              type="primary"
+              size="small"
               onClick={handleUpload}
-              disabled={!file || uploading}
-              className="btn btn-primary btn-sm"
+              loading={uploading}
+              disabled={!file}
             >
-              {uploading ? "Import…" : "Importer"}
-            </button>
+              Importer
+            </Button>
           </div>
         </>
       )}
@@ -556,20 +554,12 @@ const BondModal = ({ onClose, onSuccess }) => {
             marginTop: 8,
           }}
         >
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-ghost btn-sm"
-          >
+          <Button size="small" onClick={onClose}>
             Annuler
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="btn btn-primary btn-sm"
-          >
-            {saving ? "Enregistrement…" : "Créer Trade"}
-          </button>
+          </Button>
+          <Button type="primary" size="small" htmlType="submit" loading={saving}>
+            Créer Trade
+          </Button>
         </div>
       </form>
     </Modal>
@@ -741,20 +731,12 @@ const FutureModal = ({ onClose, onSuccess }) => {
             marginTop: 8,
           }}
         >
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-ghost btn-sm"
-          >
+          <Button size="small" onClick={onClose}>
             Annuler
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="btn btn-primary btn-sm"
-          >
-            {saving ? "Enregistrement…" : "Créer Future"}
-          </button>
+          </Button>
+          <Button type="primary" size="small" htmlType="submit" loading={saving}>
+            Créer Future
+          </Button>
         </div>
       </form>
     </Modal>
@@ -847,16 +829,17 @@ const CancelModal = ({ trade, onClose, onSuccess }) => {
         </div>
       )}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button onClick={onClose} className="btn btn-ghost btn-sm">
+        <Button size="small" onClick={onClose}>
           Fermer
-        </button>
-        <button
+        </Button>
+        <Button
+          danger
+          size="small"
           onClick={handleCancel}
-          disabled={cancelling}
-          className="btn btn-danger btn-sm"
+          loading={cancelling}
         >
-          {cancelling ? "Annulation…" : "Confirmer Annulation"}
-        </button>
+          Confirmer Annulation
+        </Button>
       </div>
     </Modal>
   );
@@ -1057,36 +1040,31 @@ const BlotterTable = () => {
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button
+            <Button
+              type="primary"
+              size="small"
               onClick={() => setShowBond(true)}
-              className="btn btn-primary btn-sm"
+              icon={<Plus size={10} />}
             >
-              <Plus size={10} />
               Bond
-            </button>
-            <button
+            </Button>
+            <Button
+              size="small"
               onClick={() => setShowFut(true)}
-              className="btn btn-ghost btn-sm"
+              icon={<TrendingUp size={10} />}
               style={{
                 borderColor: "rgba(20,188,164,0.35)",
                 color: "var(--fut)",
               }}
             >
-              <TrendingUp size={10} />
               Future
-            </button>
-            <button
+            </Button>
+            <Button
+              size="small"
+              loading={loading}
               onClick={fetchTrades}
-              disabled={loading}
-              className="btn btn-ghost btn-sm"
-            >
-              <RefreshCw
-                size={10}
-                style={{
-                  animation: loading ? "spin 1s linear infinite" : "none",
-                }}
-              />
-            </button>
+              icon={<RefreshCw size={10} />}
+            />
           </div>
         </div>
 
@@ -1287,14 +1265,13 @@ const BlotterTable = () => {
             }}
           >
             <FileText size={11} style={{ color: "var(--tx3)" }} />
-            <button
+            <Button
+              size="small"
               onClick={() => setShowCsv(true)}
-              className="btn btn-ghost btn-sm"
-              style={{ fontSize: "0.62rem", padding: "3px 8px", gap: 4 }}
+              icon={<Upload size={10} />}
             >
-              <Upload size={10} />
               Import CSV
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -1323,13 +1300,13 @@ const BlotterTable = () => {
           >
             {error}
           </span>
-          <button
+          <Button
+            size="small"
             onClick={fetchTrades}
-            className="btn btn-ghost btn-sm"
             style={{ marginLeft: "auto" }}
           >
             Réessayer
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1538,14 +1515,13 @@ const BlotterTable = () => {
                   </td>
                   <td style={{ textAlign: "center" }}>
                     {!t.isClosed && (
-                      <button
+                      <Button
+                        danger
+                        size="small"
                         onClick={() => setCancelTrade(t)}
-                        className="btn btn-danger btn-sm"
-                        style={{ padding: "3px 8px", fontSize: "0.58rem" }}
                         title="Annuler trade"
-                      >
-                        <Trash2 size={10} />
-                      </button>
+                        icon={<Trash2 size={10} />}
+                      />
                     )}
                   </td>
                 </tr>

@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
@@ -154,13 +155,14 @@ const TradingDashboard = () => {
           >
             {error}
           </p>
-          <button
+          <Button
+            size="small"
             onClick={refresh}
-            className="btn btn-ghost btn-sm"
+            icon={<RefreshCw size={12} />}
             style={{ margin: "0 auto", display: "inline-flex" }}
           >
-            <RefreshCw size={12} /> Réessayer
-          </button>
+            Réessayer
+          </Button>
         </div>
       </div>
     );

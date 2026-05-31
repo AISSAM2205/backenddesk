@@ -5,6 +5,7 @@ import React, {
   useRef,
   useEffect,
 } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import {
   AlertTriangle,
@@ -650,23 +651,19 @@ const EuroBondView = () => {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={exportCsv} className="btn btn-ghost btn-sm">
-              <Download size={10} />
-              Export CSV
-            </button>
-            <button
-              onClick={refresh}
-              disabled={loading}
-              className="btn btn-ghost btn-sm"
+            <Button
+              size="small"
+              onClick={exportCsv}
+              icon={<Download size={10} />}
             >
-              <RefreshCw
-                size={10}
-                style={{
-                  animation: loading ? "spin 1s linear infinite" : "none",
-                }}
-              />
-              Actualiser
-            </button>
+              Export CSV
+            </Button>
+            <Button
+              size="small"
+              loading={loading}
+              onClick={refresh}
+              icon={<RefreshCw size={10} />}
+            />
           </div>
         </div>
 

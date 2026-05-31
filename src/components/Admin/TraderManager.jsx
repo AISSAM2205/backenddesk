@@ -1,5 +1,6 @@
 // src/components/Admin/TraderManager.jsx
 import React, { useState } from "react";
+import { Button } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import { Plus, Edit, Trash2, Save, X, User, Users, Shield } from "lucide-react";
 
@@ -152,10 +153,9 @@ const TraderManager = () => {
             permissions et accès par section
           </p>
         </div>
-        <button onClick={openAdd} className="btn btn-primary btn-sm">
-          <Plus size={12} />
+        <Button type="primary" size="small" onClick={openAdd} icon={<Plus size={12} />}>
           Ajouter Trader
-        </button>
+        </Button>
       </div>
 
       {/* Form panel */}
@@ -184,17 +184,13 @@ const TraderManager = () => {
             >
               {adding ? "Nouveau Trader" : "Modifier Trader"}
             </h4>
-            <button
+            <Button
+              type="text"
+              size="small"
               onClick={cancel}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--tx3)",
-              }}
-            >
-              <X size={16} />
-            </button>
+              icon={<X size={16} />}
+              style={{ color: "var(--tx3)" }}
+            />
           </div>
 
           <div
@@ -380,40 +376,19 @@ const TraderManager = () => {
               borderTop: "1px solid var(--b1)",
             }}
           >
-            <button
-              onClick={cancel}
-              disabled={saving}
-              className="btn btn-ghost btn-sm"
-            >
+            <Button size="small" onClick={cancel} disabled={saving}>
               Annuler
-            </button>
-            <button
+            </Button>
+            <Button
+              type="primary"
+              size="small"
               onClick={save}
-              disabled={
-                saving ||
-                !form.firstName ||
-                !form.lastName ||
-                !form.username ||
-                !form.email
-              }
-              className="btn btn-primary btn-sm"
+              loading={saving}
+              disabled={!form.firstName || !form.lastName || !form.username || !form.email}
+              icon={<Save size={12} />}
             >
-              {saving ? (
-                <div
-                  style={{
-                    width: 12,
-                    height: 12,
-                    border: "2px solid rgba(255,255,255,0.3)",
-                    borderTopColor: "#fff",
-                    borderRadius: "50%",
-                    animation: "spin 1s linear infinite",
-                  }}
-                />
-              ) : (
-                <Save size={12} />
-              )}
               Enregistrer
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -641,52 +616,22 @@ const TraderManager = () => {
                           gap: 4,
                         }}
                       >
-                        <button
-                          onClick={() => openEdit(t)}
+                        <Button
+                          type="text"
+                          size="small"
                           title="Modifier"
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--cyan)",
-                            padding: 5,
-                            borderRadius: 6,
-                            transition: "background 0.14s",
-                          }}
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.background =
-                              "rgba(0,202,255,0.10)")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.background = "none")
-                          }
-                        >
-                          <Edit size={13} />
-                        </button>
-                        <button
-                          onClick={() => del(t)}
+                          onClick={() => openEdit(t)}
+                          icon={<Edit size={13} />}
+                          style={{ color: "var(--cyan)" }}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
                           title="Supprimer"
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--tx3)",
-                            padding: 5,
-                            borderRadius: 6,
-                            transition: "all 0.14s",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background =
-                              "rgba(255,43,96,0.10)";
-                            e.currentTarget.style.color = "var(--loss)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "none";
-                            e.currentTarget.style.color = "var(--tx3)";
-                          }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                          onClick={() => del(t)}
+                          icon={<Trash2 size={13} />}
+                        />
                       </div>
                     </td>
                   </tr>

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import {
   TrendingUp,
@@ -192,18 +193,12 @@ const FuturesView = () => {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="tag">{sorted.length} pos.</span>
-          <button
+          <Button
+            size="small"
+            loading={loading}
             onClick={refresh}
-            disabled={loading}
-            className="btn btn-ghost btn-sm"
-          >
-            <RefreshCw
-              size={10}
-              style={{
-                animation: loading ? "spin 1s linear infinite" : "none",
-              }}
-            />
-          </button>
+            icon={<RefreshCw size={10} />}
+          />
         </div>
       </div>
 

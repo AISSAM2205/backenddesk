@@ -1,5 +1,6 @@
 // src/components/Admin/LimitsManager.jsx
 import React, { useState } from "react";
+import { Button } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import { Edit, Save, X, Target, Shield, TrendingUp } from "lucide-react";
 
@@ -241,21 +242,20 @@ const LimitsManager = () => {
                     />
                   </div>
                 )}
-                <button
+                <Button
+                  type="primary"
+                  size="small"
                   onClick={save}
-                  disabled={saving}
-                  className="btn btn-primary btn-sm"
+                  loading={saving}
+                  icon={<Save size={12} />}
                   style={{ marginTop: 16 }}
-                >
-                  <Save size={12} />
-                </button>
-                <button
+                />
+                <Button
+                  size="small"
                   onClick={cancel}
-                  className="btn btn-ghost btn-sm"
+                  icon={<X size={12} />}
                   style={{ marginTop: 16 }}
-                >
-                  <X size={12} />
-                </button>
+                />
               </div>
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -295,13 +295,12 @@ const LimitsManager = () => {
                     </div>
                   )}
                 </div>
-                <button
+                <Button
+                  size="small"
                   onClick={() => openEdit(l)}
-                  className="btn btn-ghost btn-sm"
                   title="Modifier"
-                >
-                  <Edit size={12} />
-                </button>
+                  icon={<Edit size={12} />}
+                />
               </div>
             )}
           </div>

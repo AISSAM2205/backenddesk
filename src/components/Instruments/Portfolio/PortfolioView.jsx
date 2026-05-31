@@ -5,6 +5,7 @@ import React, {
   useState,
   useCallback,
 } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useAuth } from "../../../contexts/AuthContext";
 import {
@@ -1685,19 +1686,14 @@ const PortfolioView = () => {
               {lastUpdate.toLocaleTimeString("fr-FR")}
             </span>
           )}
-          <button
+          <Button
+            size="small"
+            loading={loading}
             onClick={refresh}
-            disabled={loading}
-            className="btn btn-ghost btn-sm"
+            icon={<RefreshCw size={10} />}
           >
-            <RefreshCw
-              size={10}
-              style={{
-                animation: loading ? "spin 1s linear infinite" : "none",
-              }}
-            />
             Actualiser
-          </button>
+          </Button>
         </div>
       </div>
 

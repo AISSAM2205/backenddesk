@@ -1,5 +1,6 @@
 // src/components/Admin/AuditLogView.jsx
 import React, { useState } from "react";
+import { Button } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import {
   RefreshCw,
@@ -83,16 +84,12 @@ const AuditLogView = () => {
             les opérations traçables
           </p>
         </div>
-        <button
+        <Button
+          size="small"
+          loading={loading}
           onClick={refreshData}
-          disabled={loading}
-          className="btn btn-ghost btn-sm"
-        >
-          <RefreshCw
-            size={12}
-            style={{ animation: loading ? "spin 1s linear infinite" : "none" }}
-          />
-        </button>
+          icon={<RefreshCw size={12} />}
+        />
       </div>
 
       {/* Search */}

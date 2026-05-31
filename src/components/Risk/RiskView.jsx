@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import {
   AlertTriangle,
@@ -265,19 +266,14 @@ const RiskView = () => {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="tag">{rows.length} positions</span>
-          <button
+          <Button
+            size="small"
+            loading={loading}
             onClick={refresh}
-            disabled={loading}
-            className="btn btn-ghost btn-sm"
+            icon={<RefreshCw size={10} />}
           >
-            <RefreshCw
-              size={10}
-              style={{
-                animation: loading ? "spin 1s linear infinite" : "none",
-              }}
-            />
             Actualiser
-          </button>
+          </Button>
         </div>
       </div>
 

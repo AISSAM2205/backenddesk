@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useAdmin } from "../../contexts/AdminContext";
@@ -1602,29 +1603,35 @@ const ReportingView = () => {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button
+              <Button
+                size="small"
                 onClick={handlePrint}
-                className="btn btn-ghost btn-sm"
+                icon={<Printer size={10} />}
+                title="Générer un PDF A4 complet"
                 style={{
                   background: "rgba(0,232,153,0.06)",
                   borderColor: "rgba(0,232,153,0.18)",
                   color: "var(--profit)",
                 }}
-                title="Générer un PDF A4 complet"
               >
-                <Printer size={10} /> Export PDF
-              </button>
-              <button
+                Export PDF
+              </Button>
+              <Button
+                size="small"
                 onClick={handleExportCsv}
-                className="btn btn-ghost btn-sm"
+                icon={<Download size={10} />}
                 title="Export CSV complet — 6 sections : objectifs, marchés, attribution, statistiques, historique mensuel/journalier, positions"
               >
-                <Download size={10} /> CSV Complet
-              </button>
-              <button onClick={refresh} className="btn btn-ghost btn-sm">
-                <RefreshCw size={10} className={loading ? "spin" : ""} />{" "}
+                CSV Complet
+              </Button>
+              <Button
+                size="small"
+                loading={loading}
+                onClick={refresh}
+                icon={<RefreshCw size={10} />}
+              >
                 Actualiser
-              </button>
+              </Button>
             </div>
           </div>
 

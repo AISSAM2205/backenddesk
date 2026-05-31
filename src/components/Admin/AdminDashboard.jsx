@@ -1,24 +1,29 @@
 // src/components/Admin/AdminDashboard.jsx
-import React, { useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { useAdmin } from "../../contexts/AdminContext";
-import TraderManager from "./TraderManager";
-import InstrumentManager from "./InstrumentManager";
-import TraderLimits from "./TraderLimits";
-import LimitsManager from "./LimitsManager";
-import AuditLogView from "./AuditLogView";
+import { Avatar, Button, Dropdown, Switch } from "antd";
 import {
-  Users,
+  AlertTriangle,
   Briefcase,
+  ChevronDown,
+  ClipboardList,
   DollarSign,
   LogOut,
-  Settings,
+  Moon,
   RefreshCw,
-  AlertTriangle,
-  X,
+  Sun,
   Target,
-  ClipboardList,
+  User2,
+  Users,
+  X,
 } from "lucide-react";
+import { useState } from "react";
+import { useAdmin } from "../../contexts/AdminContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
+import AuditLogView from "./AuditLogView";
+import InstrumentManager from "./InstrumentManager";
+import LimitsManager from "./LimitsManager";
+import TraderLimits from "./TraderLimits";
+import TraderManager from "./TraderManager";
 
 const TABS = [
   {
@@ -56,6 +61,7 @@ const TABS = [
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("traders");
   const { user, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const { traders, instruments, loading, error, refreshData, clearError } =
     useAdmin();
 
@@ -136,104 +142,235 @@ const AdminDashboard = () => {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "4px 10px",
-              borderRadius: 6,
-              background: "var(--elev)",
-              border: "1px solid var(--b1)",
-            }}
-          >
-            <Settings size={11} style={{ color: "var(--cyan)" }} />
-            <span
-              style={{
-                fontFamily: "var(--f-disp)",
-                fontSize: "0.60rem",
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "var(--cyan)",
-              }}
-            >
-              Admin
-            </span>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                background:
-                  "linear-gradient(135deg, rgba(0,202,255,0.20) 0%, rgba(30,127,255,0.30) 100%)",
-                border: "1px solid var(--b2)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontFamily: "var(--f-disp)",
-                fontWeight: 700,
-                fontSize: "0.78rem",
-                color: "var(--cyan)",
-              }}
-            >
-              {initial}
-            </div>
-            <div>
-              <div
-                style={{
-                  fontFamily: "var(--f-body)",
-                  fontWeight: 500,
-                  fontSize: "0.72rem",
-                  color: "var(--tx1)",
-                  lineHeight: 1.2,
-                }}
-              >
-                {user?.firstName ||
-                  user?.name ||
-                  user?.username ||
-                  "Administrateur"}
-              </div>
-              <div
-                style={{
-                  fontFamily: "var(--f-disp)",
-                  fontSize: "0.56rem",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.07em",
-                  color: "var(--tx3)",
-                }}
-              >
-                {user?.email || ""}
-              </div>
-            </div>
-          </div>
-
-          <button
+          {/* Refresh — next to avatar */}
+          <Button
+            size="small"
+            loading={loading}
             onClick={refreshData}
-            disabled={loading}
-            className="btn btn-ghost btn-sm"
+            icon={<RefreshCw size={11} />}
+          />
+
+          {/* User dropdown */}
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            dropdownRender={() => (
+              <div
+                style={{
+                  width: 248,
+                  background: "var(--elev)",
+                  border: "1px solid var(--b2)",
+                  borderRadius: 12,
+                  boxShadow: "0 16px 48px rgba(0,0,0,0.40)",
+                  overflow: "hidden",
+                }}
+              >
+                {/* User info */}
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    borderBottom: "1px solid var(--b1)",
+                  }}
+                >
+                  <Avatar shape="square" icon={<User2 size={16} />}>
+                    {initial}
+                  </Avatar>
+                  <div style={{ overflow: "hidden", minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontFamily: "var(--f-body)",
+                        fontWeight: 600,
+                        fontSize: "0.82rem",
+                        color: "var(--tx1)",
+                        lineHeight: 1.3,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {user?.firstName
+                        ? `${user.firstName} ${user.lastName || ""}`.trim()
+                        : user?.name || user?.username || "Administrateur"}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--f-mono)",
+                        fontSize: "0.64rem",
+                        color: "var(--tx3)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        marginTop: 2,
+                      }}
+                    >
+                      {user?.email ||
+                        `${user?.username || "admin"}@attijariwafa.ma`}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Theme toggle */}
+                <div style={{ padding: "4px 0" }}>
+                  <button
+                    onClick={toggleTheme}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "9px 16px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "var(--surf)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "none")
+                    }
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      {isDark ? (
+                        <Sun size={14} style={{ color: "#FCD34D" }} />
+                      ) : (
+                        <Moon size={14} style={{ color: "#60A5FA" }} />
+                      )}
+                      <span
+                        style={{
+                          fontFamily: "var(--f-body)",
+                          fontSize: "0.78rem",
+                          color: "var(--tx1)",
+                        }}
+                      >
+                        {isDark ? "Light Mode" : "Dark Mode"}
+                      </span>
+                    </div>
+                    <Switch
+                      size="small"
+                      checked={isDark}
+                      onChange={toggleTheme}
+                      onClick={(_, e) => e.stopPropagation()}
+                    />
+                  </button>
+                </div>
+
+                {/* Divider */}
+                <div
+                  style={{
+                    height: 1,
+                    background: "var(--b1)",
+                    margin: "0 8px",
+                  }}
+                />
+
+                {/* Logout */}
+                <div style={{ padding: "4px 0" }}>
+                  <button
+                    onClick={logout}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "9px 16px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background =
+                        "rgba(255,43,96,0.08)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "none")
+                    }
+                  >
+                    <LogOut size={14} style={{ color: "var(--loss)" }} />
+                    <span
+                      style={{
+                        fontFamily: "var(--f-body)",
+                        fontSize: "0.78rem",
+                        color: "var(--loss)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      Log out
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
           >
-            <RefreshCw
-              size={11}
-              style={{
-                animation: loading ? "spin 1s linear infinite" : "none",
-              }}
-            />
-          </button>
-          <button
-            onClick={logout}
-            className="btn btn-ghost btn-sm"
-            title="Déconnexion"
-            style={{ color: "var(--tx3)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--loss)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--tx3)")}
-          >
-            <LogOut size={13} />
-          </button>
+            <Button
+              type="text"
+              // style={{
+              //   display: "flex",
+              //   alignItems: "center",
+              //   gap: 7,
+              //   padding: "4px 8px 4px 4px",
+              //   borderRadius: 8,
+              //   background: "transparent",
+              //   border: "1px solid transparent",
+              //   cursor: "pointer",
+              //   transition: "all 0.15s",
+              // }}
+              // onMouseEnter={(e) => {
+              //   e.currentTarget.style.background = "var(--surf)";
+              //   e.currentTarget.style.borderColor = "var(--b1)";
+              // }}
+              // onMouseLeave={(e) => {
+              //   e.currentTarget.style.background = "transparent";
+              //   e.currentTarget.style.borderColor = "transparent";
+              // }}
+            >
+              <Avatar shape="square" icon={<User2 size={16} />}>
+                {initial}
+              </Avatar>
+              <div style={{ textAlign: "left" }}>
+                <div
+                  style={{
+                    fontFamily: "var(--f-body)",
+                    fontWeight: 500,
+                    fontSize: "0.72rem",
+                    color: "var(--tx1)",
+                    lineHeight: 1.2,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {user?.firstName ||
+                    user?.name ||
+                    user?.username ||
+                    "Administrateur"}
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--f-disp)",
+                    fontSize: "0.55rem",
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    color: "var(--tx3)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Admin
+                </div>
+              </div>
+              <ChevronDown size={11} style={{ color: "var(--tx3)" }} />
+            </Button>
+          </Dropdown>
         </div>
       </div>
 
@@ -263,17 +400,13 @@ const AdminDashboard = () => {
           >
             {error}
           </span>
-          <button
+          <Button
+            type="text"
+            size="small"
             onClick={clearError}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--tx3)",
-            }}
-          >
-            <X size={13} />
-          </button>
+            icon={<X size={13} />}
+            style={{ color: "var(--tx3)" }}
+          />
         </div>
       )}
 

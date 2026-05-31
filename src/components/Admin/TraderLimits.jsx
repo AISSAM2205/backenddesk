@@ -1,5 +1,6 @@
 // src/components/Admin/TraderLimits.jsx
 import React, { useState } from "react";
+import { Button } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import { useToast } from "../Common/Toast";
 import { Edit, Save, X, User, AlertTriangle, Shield } from "lucide-react";
@@ -235,31 +236,18 @@ const TraderLimits = () => {
                     }}
                   >
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={cancel} className="btn btn-ghost btn-sm">
-                        <X size={12} />
+                      <Button size="small" onClick={cancel} icon={<X size={12} />}>
                         Annuler
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        type="primary"
+                        size="small"
                         onClick={save}
-                        disabled={saving}
-                        className="btn btn-primary btn-sm"
+                        loading={saving}
+                        icon={<Save size={12} />}
                       >
-                        {saving ? (
-                          <div
-                            style={{
-                              width: 12,
-                              height: 12,
-                              border: "2px solid rgba(255,255,255,0.3)",
-                              borderTopColor: "#fff",
-                              borderRadius: "50%",
-                              animation: "spin 1s linear infinite",
-                            }}
-                          />
-                        ) : (
-                          <Save size={12} />
-                        )}
                         Sauvegarder
-                      </button>
+                      </Button>
                     </div>
                     {saveError && editing === t.id && (
                       <span
@@ -274,13 +262,13 @@ const TraderLimits = () => {
                     )}
                   </div>
                 ) : (
-                  <button
+                  <Button
+                    size="small"
                     onClick={() => openEdit(t)}
-                    className="btn btn-ghost btn-sm"
+                    icon={<Edit size={12} />}
                   >
-                    <Edit size={12} />
                     Modifier limites
-                  </button>
+                  </Button>
                 )}
               </div>
 

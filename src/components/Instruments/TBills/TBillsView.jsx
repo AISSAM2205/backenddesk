@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import { AlertTriangle, TrendingUp, DollarSign, RefreshCw } from "lucide-react";
 import api from "../../../services/api";
@@ -442,17 +443,14 @@ const TBillsView = () => {
             Titres offshore · Bills Gouvernementaux & Corpo · USD + EUR
           </div>
         </div>
-        <button
+        <Button
+          size="small"
+          loading={loading}
           onClick={loadTBills}
-          disabled={loading}
-          className="btn btn-ghost btn-sm"
+          icon={<RefreshCw size={12} />}
         >
-          <RefreshCw
-            size={12}
-            style={{ animation: loading ? "spin 1s linear infinite" : "none" }}
-          />
           Actualiser
-        </button>
+        </Button>
       </div>
 
       {/* ── Mock data warning ── */}

@@ -414,33 +414,26 @@ const TopBar = () => {
             </button>
 
             {/* Theme toggle */}
-            <button
+            <Button
+              size="small"
               onClick={toggleTheme}
-              className="btn btn-ghost btn-sm"
               title={isDark ? "Mode clair" : "Mode sombre"}
-              style={{ padding: 7 }}
-            >
-              {isDark ? (
-                <Sun size={13} style={{ color: "#FCD34D" }} />
-              ) : (
-                <Moon size={13} style={{ color: "#60A5FA" }} />
-              )}
-            </button>
+              icon={
+                isDark ? (
+                  <Sun size={13} style={{ color: "#FCD34D" }} />
+                ) : (
+                  <Moon size={13} style={{ color: "#60A5FA" }} />
+                )
+              }
+            />
 
             {/* Refresh */}
-            <button
+            <Button
+              size="small"
+              loading={loading}
               onClick={refresh}
-              disabled={loading}
-              className="btn btn-ghost btn-sm"
-              style={{ gap: 5 }}
-            >
-              <RefreshCw
-                size={11}
-                style={{
-                  animation: loading ? "spin 1s linear infinite" : "none",
-                }}
-              />
-            </button>
+              icon={<RefreshCw size={11} />}
+            />
 
             {/* Divider */}
             <span style={{ width: 1, height: 22, background: "var(--b1)" }} />

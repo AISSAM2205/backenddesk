@@ -1,5 +1,6 @@
 // src/components/Admin/InstrumentManager.jsx
 import React, { useState } from "react";
+import { Button } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import { Plus, Edit, Trash2, Save, X, Briefcase } from "lucide-react";
 
@@ -229,10 +230,9 @@ const InstrumentManager = () => {
             Gérez les instruments par classe d'actifs
           </p>
         </div>
-        <button onClick={openAdd} className="btn btn-primary btn-sm">
-          <Plus size={12} />
+        <Button type="primary" size="small" onClick={openAdd} icon={<Plus size={12} />}>
           Ajouter
-        </button>
+        </Button>
       </div>
 
       {/* Type selector */}
@@ -316,17 +316,13 @@ const InstrumentManager = () => {
             >
               {adding ? `Nouveau ${config.name}` : `Modifier ${config.name}`}
             </h4>
-            <button
+            <Button
+              type="text"
+              size="small"
               onClick={cancel}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--tx3)",
-              }}
-            >
-              <X size={16} />
-            </button>
+              icon={<X size={16} />}
+              style={{ color: "var(--tx3)" }}
+            />
           </div>
 
           <div
@@ -399,34 +395,18 @@ const InstrumentManager = () => {
               borderTop: "1px solid var(--b1)",
             }}
           >
-            <button
-              onClick={cancel}
-              disabled={saving}
-              className="btn btn-ghost btn-sm"
-            >
+            <Button size="small" onClick={cancel} disabled={saving}>
               Annuler
-            </button>
-            <button
+            </Button>
+            <Button
+              type="primary"
+              size="small"
               onClick={save}
-              disabled={saving}
-              className="btn btn-primary btn-sm"
+              loading={saving}
+              icon={<Save size={12} />}
             >
-              {saving ? (
-                <div
-                  style={{
-                    width: 12,
-                    height: 12,
-                    border: "2px solid rgba(255,255,255,0.3)",
-                    borderTopColor: "#fff",
-                    borderRadius: "50%",
-                    animation: "spin 1s linear infinite",
-                  }}
-                />
-              ) : (
-                <Save size={12} />
-              )}
               Enregistrer
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -563,50 +543,22 @@ const InstrumentManager = () => {
                           gap: 4,
                         }}
                       >
-                        <button
-                          onClick={() => openEdit(item)}
+                        <Button
+                          type="text"
+                          size="small"
                           title="Modifier"
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--cyan)",
-                            padding: 5,
-                            borderRadius: 6,
-                          }}
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.background =
-                              "rgba(0,202,255,0.10)")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.background = "none")
-                          }
-                        >
-                          <Edit size={13} />
-                        </button>
-                        <button
-                          onClick={() => del(item)}
+                          onClick={() => openEdit(item)}
+                          icon={<Edit size={13} />}
+                          style={{ color: "var(--cyan)" }}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
                           title="Supprimer"
-                          style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "var(--tx3)",
-                            padding: 5,
-                            borderRadius: 6,
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background =
-                              "rgba(255,43,96,0.10)";
-                            e.currentTarget.style.color = "var(--loss)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "none";
-                            e.currentTarget.style.color = "var(--tx3)";
-                          }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                          onClick={() => del(item)}
+                          icon={<Trash2 size={13} />}
+                        />
                       </div>
                     </td>
                   </tr>

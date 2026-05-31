@@ -193,6 +193,10 @@ const makeComponents = (dark) => {
   const t = dark ? darkTokens : lightTokens;
 
   return {
+    Avatar: {
+      backgrountdColor: t.colorBgElevated,
+      borderRadius: 6,
+    },
     Button: {
       // Display font for all buttons, matches .btn in index.css
       fontFamily: '"Syne", system-ui, sans-serif',

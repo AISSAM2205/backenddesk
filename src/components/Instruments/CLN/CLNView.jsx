@@ -1,24 +1,66 @@
-import React, { useMemo, useState } from 'react';
-import { useTrading } from '../../../contexts/TradingContext';
-import { Shield, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import React, { useMemo, useState } from "react";
+import { useTrading } from "../../../contexts/TradingContext";
+import {
+  Shield,
+  RefreshCw,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+} from "lucide-react";
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
-const fN  = (v, d = 2) => { if (v == null) return '—'; const n = parseFloat(v); if (isNaN(n)) return '—'; return n.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }); };
-const fMAD = (v) => { if (v == null) return '—'; const n = parseFloat(v); if (isNaN(n)) return '—'; const a = Math.abs(n), s = n >= 0 ? '+' : '−'; if (a >= 1e6) return `${s}${(a / 1e6).toFixed(2)}M`; return n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }); };
-const fUSD = (v) => { if (v == null) return '—'; const n = parseFloat(v); if (isNaN(n)) return '—'; const a = Math.abs(n), s = n >= 0 ? '+' : ''; if (a >= 1e6) return `${s}${(n / 1e6).toFixed(2)}M`; return `${s}${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })}`; };
-const fMat = (d) => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); } catch { return d; } };
-const pnlColor = (v) => parseFloat(v || 0) >= 0 ? 'var(--profit)' : 'var(--loss)';
+const fN = (v, d = 2) => {
+  if (v == null) return "—";
+  const n = parseFloat(v);
+  if (isNaN(n)) return "—";
+  return n.toLocaleString("fr-FR", {
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
+  });
+};
+const fMAD = (v) => {
+  if (v == null) return "—";
+  const n = parseFloat(v);
+  if (isNaN(n)) return "—";
+  const a = Math.abs(n),
+    s = n >= 0 ? "+" : "−";
+  if (a >= 1e6) return `${s}${(a / 1e6).toFixed(2)}M`;
+  return n.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
+};
+const fUSD = (v) => {
+  if (v == null) return "—";
+  const n = parseFloat(v);
+  if (isNaN(n)) return "—";
+  const a = Math.abs(n),
+    s = n >= 0 ? "+" : "";
+  if (a >= 1e6) return `${s}${(n / 1e6).toFixed(2)}M`;
+  return `${s}${n.toLocaleString("fr-FR", { maximumFractionDigits: 0 })}`;
+};
+const fMat = (d) => {
+  if (!d) return "—";
+  try {
+    return new Date(d).toLocaleDateString("fr-FR", {
+      month: "short",
+      year: "2-digit",
+    });
+  } catch {
+    return d;
+  }
+};
+const pnlColor = (v) =>
+  parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)";
 
 /* ─── Credit Concentration Panel ─────────────────────────────────── */
 const CreditConcentration = ({ positions }) => {
   if (!positions?.length) return null;
   const byCounterparty = {};
-  positions.forEach(r => {
-    const cp = r.counterparty || 'Autres';
-    if (!byCounterparty[cp]) byCounterparty[cp] = { nominal: 0, plEcoMad: 0, count: 0 };
-    byCounterparty[cp].nominal  += parseFloat(r.nominalUsd || 0);
-    byCounterparty[cp].plEcoMad += parseFloat(r.plEcoMad   || 0);
-    byCounterparty[cp].count    += 1;
+  positions.forEach((r) => {
+    const cp = r.counterparty || "Autres";
+    if (!byCounterparty[cp])
+      byCounterparty[cp] = { nominal: 0, plEcoMad: 0, count: 0 };
+    byCounterparty[cp].nominal += parseFloat(r.nominalUsd || 0);
+    byCounterparty[cp].plEcoMad += parseFloat(r.plEcoMad || 0);
+    byCounterparty[cp].count += 1;
   });
   const entries = Object.entries(byCounterparty)
     .map(([name, v]) => ({ name, ...v }))
@@ -26,34 +68,103 @@ const CreditConcentration = ({ positions }) => {
   const maxNom = entries[0]?.nominal || 1;
   const totalNom = entries.reduce((s, e) => s + e.nominal, 0);
   return (
-    <div className="card slide-up stagger-2" style={{ padding: '14px 16px' }}>
-      <p className="sect-ttl" style={{ marginBottom: 12 }}>Concentration Crédit — par Contrepartie</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {entries.map(e => {
-          const pct  = (e.nominal / maxNom) * 100;
-          const share = (e.nominal / totalNom * 100).toFixed(1);
+    <div className="card slide-up stagger-2" style={{ padding: "14px 16px" }}>
+      <p className="sect-ttl" style={{ marginBottom: 12 }}>
+        Concentration Crédit — par Contrepartie
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {entries.map((e) => {
+          const pct = (e.nominal / maxNom) * 100;
+          const share = ((e.nominal / totalNom) * 100).toFixed(1);
           const pnlPos = e.plEcoMad >= 0;
           return (
             <div key={e.name}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, alignItems: 'baseline' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontFamily: 'var(--f-body)', fontSize: '0.70rem', fontWeight: 500, color: 'var(--tx1)' }}>{e.name}</span>
-                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.57rem', color: 'var(--tx3)', padding: '1px 5px', background: 'var(--elev)', borderRadius: 3 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 3,
+                  alignItems: "baseline",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--f-body)",
+                      fontSize: "0.70rem",
+                      fontWeight: 500,
+                      color: "var(--tx1)",
+                    }}
+                  >
+                    {e.name}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--f-mono)",
+                      fontSize: "0.57rem",
+                      color: "var(--tx3)",
+                      padding: "1px 5px",
+                      background: "var(--elev)",
+                      borderRadius: 3,
+                    }}
+                  >
                     {e.count} pos.
                   </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: '#C084FC' }}>
-                    {e.nominal >= 1e6 ? `${(e.nominal / 1e6).toFixed(0)}M` : `${(e.nominal / 1e3).toFixed(0)}k`} USD
+                <div
+                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--f-mono)",
+                      fontSize: "0.65rem",
+                      color: "#C084FC",
+                    }}
+                  >
+                    {e.nominal >= 1e6
+                      ? `${(e.nominal / 1e6).toFixed(0)}M`
+                      : `${(e.nominal / 1e3).toFixed(0)}k`}{" "}
+                    USD
                   </span>
-                  <span style={{ fontFamily: 'var(--f-disp)', fontSize: '0.58rem', color: 'var(--tx3)' }}>{share}%</span>
-                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.63rem', color: pnlPos ? 'var(--profit)' : 'var(--loss)', fontWeight: 600 }}>
-                    {e.plEcoMad >= 0 ? '+' : ''}{(e.plEcoMad / 1e6).toFixed(2)}M
+                  <span
+                    style={{
+                      fontFamily: "var(--f-disp)",
+                      fontSize: "0.58rem",
+                      color: "var(--tx3)",
+                    }}
+                  >
+                    {share}%
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--f-mono)",
+                      fontSize: "0.63rem",
+                      color: pnlPos ? "var(--profit)" : "var(--loss)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {e.plEcoMad >= 0 ? "+" : ""}
+                    {(e.plEcoMad / 1e6).toFixed(2)}M
                   </span>
                 </div>
               </div>
-              <div style={{ height: 5, background: 'var(--b1)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${pct}%`, background: 'rgba(192,132,252,0.65)', borderRadius: 3, transition: 'width 0.6s ease' }} />
+              <div
+                style={{
+                  height: 5,
+                  background: "var(--b1)",
+                  borderRadius: 3,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${pct}%`,
+                    background: "rgba(192,132,252,0.65)",
+                    borderRadius: 3,
+                    transition: "width 0.6s ease",
+                  }}
+                />
               </div>
             </div>
           );
@@ -64,43 +175,83 @@ const CreditConcentration = ({ positions }) => {
 };
 
 const SortIcon = ({ active, dir }) => {
-  if (!active) return <ChevronsUpDown size={10} style={{ opacity: 0.25, marginLeft: 3 }} />;
-  return dir === 'asc' ? <ChevronUp size={10} style={{ color: 'var(--cyan)', marginLeft: 3 }} /> : <ChevronDown size={10} style={{ color: 'var(--cyan)', marginLeft: 3 }} />;
+  if (!active)
+    return (
+      <ChevronsUpDown size={10} style={{ opacity: 0.25, marginLeft: 3 }} />
+    );
+  return dir === "asc" ? (
+    <ChevronUp size={10} style={{ color: "var(--cyan)", marginLeft: 3 }} />
+  ) : (
+    <ChevronDown size={10} style={{ color: "var(--cyan)", marginLeft: 3 }} />
+  );
 };
 
 const CLNView = () => {
   const { clnList, loading, refresh, selectedDate } = useTrading();
-  const [sortKey, setSortKey] = useState('plEcoMad');
-  const [sortDir, setSortDir] = useState('desc');
+  const [sortKey, setSortKey] = useState("plEcoMad");
+  const [sortDir, setSortDir] = useState("desc");
 
   const handleSort = (k) => {
-    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(k); setSortDir('desc'); }
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(k);
+      setSortDir("desc");
+    }
   };
 
   const sorted = useMemo(() => {
     if (!sortKey) return clnList;
     return [...clnList].sort((a, b) => {
-      const na = parseFloat(a[sortKey]), nb = parseFloat(b[sortKey]);
-      if (!isNaN(na) && !isNaN(nb)) return sortDir === 'asc' ? na - nb : nb - na;
-      const sa = String(a[sortKey] ?? ''), sb = String(b[sortKey] ?? '');
-      return sortDir === 'asc' ? sa.localeCompare(sb) : sb.localeCompare(sa);
+      const na = parseFloat(a[sortKey]),
+        nb = parseFloat(b[sortKey]);
+      if (!isNaN(na) && !isNaN(nb))
+        return sortDir === "asc" ? na - nb : nb - na;
+      const sa = String(a[sortKey] ?? ""),
+        sb = String(b[sortKey] ?? "");
+      return sortDir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa);
     });
   }, [clnList, sortKey, sortDir]);
 
   // ─── Totals (ExternalPnlSnapshot fields) ──────────────────────────
-  const totals = useMemo(() => sorted.reduce((acc, r) => ({
-    nominalUsd:    acc.nominalUsd    + parseFloat(r.nominalUsd    || 0),
-    plEcoMad:      acc.plEcoMad      + parseFloat(r.plEcoMad      || 0),
-    plRealizedUsd: acc.plRealizedUsd + parseFloat(r.plRealizedUsd || 0),
-    plLatentUsd:   acc.plLatentUsd   + parseFloat(r.plLatentUsd   || 0),
-    fundingUsd:    acc.fundingUsd    + parseFloat(r.fundingUsd    || 0),
-  }), { nominalUsd: 0, plEcoMad: 0, plRealizedUsd: 0, plLatentUsd: 0, fundingUsd: 0 }), [sorted]);
+  const totals = useMemo(
+    () =>
+      sorted.reduce(
+        (acc, r) => ({
+          nominalUsd: acc.nominalUsd + parseFloat(r.nominalUsd || 0),
+          plEcoMad: acc.plEcoMad + parseFloat(r.plEcoMad || 0),
+          plRealizedUsd: acc.plRealizedUsd + parseFloat(r.plRealizedUsd || 0),
+          plLatentUsd: acc.plLatentUsd + parseFloat(r.plLatentUsd || 0),
+          fundingUsd: acc.fundingUsd + parseFloat(r.fundingUsd || 0),
+        }),
+        {
+          nominalUsd: 0,
+          plEcoMad: 0,
+          plRealizedUsd: 0,
+          plLatentUsd: 0,
+          fundingUsd: 0,
+        },
+      ),
+    [sorted],
+  );
 
   const Th = ({ k, label, right }) => (
-    <th onClick={() => handleSort(k)} style={{ textAlign: right ? 'right' : 'left', cursor: 'pointer', color: sortKey === k ? 'var(--cyan)' : 'var(--tx3)' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: right ? 'flex-end' : 'flex-start' }}>
-        {label}<SortIcon active={sortKey === k} dir={sortDir} />
+    <th
+      onClick={() => handleSort(k)}
+      style={{
+        textAlign: right ? "right" : "left",
+        cursor: "pointer",
+        color: sortKey === k ? "var(--cyan)" : "var(--tx3)",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: right ? "flex-end" : "flex-start",
+        }}
+      >
+        {label}
+        <SortIcon active={sortKey === k} dir={sortDir} />
       </span>
     </th>
   );
@@ -109,41 +260,115 @@ const CLNView = () => {
   const snapshotDate = clnList.length > 0 ? clnList[0].snapshotDate : null;
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', background: 'var(--void)' }}>
+    <div style={{ flex: 1, overflowY: "auto", background: "var(--void)" }}>
       <div className="view-hdr">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ display: 'inline-block', width: 2, height: 13, background: '#9B3EEF', borderRadius: 1, flexShrink: 0 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 2,
+                height: 13,
+                background: "#9B3EEF",
+                borderRadius: 1,
+                flexShrink: 0,
+              }}
+            />
             <h2 className="view-title">CLN — Credit Linked Notes</h2>
-            <span className="tag" style={{ marginLeft: 2, color: '#C084FC', borderColor: 'rgba(192,132,252,0.3)', background: 'rgba(192,132,252,0.06)' }}>
+            <span
+              className="tag"
+              style={{
+                marginLeft: 2,
+                color: "#C084FC",
+                borderColor: "rgba(192,132,252,0.3)",
+                background: "rgba(192,132,252,0.06)",
+              }}
+            >
               Structuré
             </span>
           </div>
           <p className="view-sub" style={{ paddingLeft: 9 }}>
-            {clnList.length} position{clnList.length !== 1 ? 's' : ''}
-            {snapshotDate && <span style={{ marginLeft: 8, color: 'var(--tx3)' }}>snapshot {snapshotDate}</span>}
+            {clnList.length} position{clnList.length !== 1 ? "s" : ""}
+            {snapshotDate && (
+              <span style={{ marginLeft: 8, color: "var(--tx3)" }}>
+                snapshot {snapshotDate}
+              </span>
+            )}
           </p>
         </div>
-        <button onClick={refresh} disabled={loading} className="btn btn-ghost btn-sm">
-          <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="btn btn-ghost btn-sm"
+        >
+          <RefreshCw
+            size={10}
+            style={{ animation: loading ? "spin 1s linear infinite" : "none" }}
+          />
         </button>
       </div>
 
-      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
+      <div
+        style={{
+          padding: "16px 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
         {/* KPI Row */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {[
-            ['P&L Économique (MAD)', fMAD(totals.plEcoMad),      pnlColor(totals.plEcoMad)],
-            ['P&L Réalisé (USD)',    fUSD(totals.plRealizedUsd),  pnlColor(totals.plRealizedUsd)],
-            ['P&L Latent (USD)',     fUSD(totals.plLatentUsd),    pnlColor(totals.plLatentUsd)],
-            ['Nominal Total (USD)',  `${fN(totals.nominalUsd / 1e6, 0)} M`, 'var(--tx1)'],
-            ['Financement (USD)',    fUSD(totals.fundingUsd),     'var(--warn)'],
-            ['Nb Positions',         clnList.length.toString(),   '#C084FC'],
+            [
+              "P&L Économique (MAD)",
+              fMAD(totals.plEcoMad),
+              pnlColor(totals.plEcoMad),
+            ],
+            [
+              "P&L Réalisé (USD)",
+              fUSD(totals.plRealizedUsd),
+              pnlColor(totals.plRealizedUsd),
+            ],
+            [
+              "P&L Latent (USD)",
+              fUSD(totals.plLatentUsd),
+              pnlColor(totals.plLatentUsd),
+            ],
+            [
+              "Nominal Total (USD)",
+              `${fN(totals.nominalUsd / 1e6, 0)} M`,
+              "var(--tx1)",
+            ],
+            ["Financement (USD)", fUSD(totals.fundingUsd), "var(--warn)"],
+            ["Nb Positions", clnList.length.toString(), "#C084FC"],
           ].map(([label, value, valColor]) => (
-            <div key={label} className="card" style={{ flex: '1 1 130px', padding: '8px 10px' }}>
-              <div className="lbl" style={{ marginBottom: 5, fontSize: '0.53rem', letterSpacing: '0.12em' }}>{label}</div>
-              <div className="n" style={{ fontSize: '1.10rem', fontWeight: 600, lineHeight: 1, color: valColor, letterSpacing: '-0.02em' }}>{value}</div>
+            <div
+              key={label}
+              className="card"
+              style={{ flex: "1 1 130px", padding: "8px 10px" }}
+            >
+              <div
+                className="lbl"
+                style={{
+                  marginBottom: 5,
+                  fontSize: "0.53rem",
+                  letterSpacing: "0.12em",
+                }}
+              >
+                {label}
+              </div>
+              <div
+                className="n"
+                style={{
+                  fontSize: "1.10rem",
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  color: valColor,
+                  letterSpacing: "-0.02em",
+                }}
+              >
+                {value}
+              </div>
             </div>
           ))}
         </div>
@@ -152,55 +377,200 @@ const CLNView = () => {
         <CreditConcentration positions={clnList} />
 
         {/* Table */}
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Shield size={13} style={{ color: '#9B3EEF' }} />
-            <h3 style={{ fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx1)' }}>
+        <div className="card" style={{ overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid var(--b1)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <Shield size={13} style={{ color: "#9B3EEF" }} />
+            <h3
+              style={{
+                fontFamily: "var(--f-disp)",
+                fontWeight: 700,
+                fontSize: "0.68rem",
+                letterSpacing: "0.10em",
+                textTransform: "uppercase",
+                color: "var(--tx1)",
+              }}
+            >
               Positions CLN
             </h3>
-            <span style={{ fontFamily: 'var(--f-mono)', fontSize: '0.65rem', color: 'var(--tx3)', padding: '2px 7px', background: 'var(--elev)', borderRadius: 4, border: '1px solid var(--b1)' }}>
+            <span
+              style={{
+                fontFamily: "var(--f-mono)",
+                fontSize: "0.65rem",
+                color: "var(--tx3)",
+                padding: "2px 7px",
+                background: "var(--elev)",
+                borderRadius: 4,
+                border: "1px solid var(--b1)",
+              }}
+            >
               {clnList.length}
             </span>
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: "auto" }}>
             <table className="dtable">
               <thead>
                 <tr>
-                  <Th k="isin"          label="ISIN"           />
-                  <Th k="description"   label="Description"    />
-                  <Th k="counterparty"  label="Contrepartie"   />
-                  <Th k="maturityDate"  label="Échéance"       />
-                  <Th k="couponRate"    label="Coupon %"       right />
-                  <Th k="nominalUsd"    label="Nominal M"      right />
-                  <Th k="plRealizedUsd" label="P&L Réalisé $"  right />
-                  <Th k="plLatentUsd"   label="P&L Latent $"   right />
-                  <Th k="plEcoMad"      label="P&L Éco ★ MAD" right />
-                  <Th k="fundingUsd"    label="Funding $"      right />
-                  <Th k="duration"      label="Duration"       right />
+                  <Th k="isin" label="ISIN" />
+                  <Th k="description" label="Description" />
+                  <Th k="counterparty" label="Contrepartie" />
+                  <Th k="maturityDate" label="Échéance" />
+                  <Th k="couponRate" label="Coupon %" right />
+                  <Th k="nominalUsd" label="Nominal M" right />
+                  <Th k="plRealizedUsd" label="P&L Réalisé $" right />
+                  <Th k="plLatentUsd" label="P&L Latent $" right />
+                  <Th k="plEcoMad" label="P&L Éco ★ MAD" right />
+                  <Th k="fundingUsd" label="Funding $" right />
+                  <Th k="duration" label="Duration" right />
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((r, idx) => {
-                  const rowBg = idx % 2 === 0 ? 'var(--tr-even-bg)' : 'transparent';
+                  const rowBg =
+                    idx % 2 === 0 ? "var(--tr-even-bg)" : "transparent";
                   return (
-                    <tr key={r.isin + idx} style={{ background: rowBg }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--tr-hover-bg)'}
-                      onMouseLeave={e => e.currentTarget.style.background = rowBg}>
-                      <td style={{ fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: '#C084FC', fontWeight: 500 }}>{r.isin}</td>
-                      <td style={{ textAlign: 'left', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.70rem', color: 'var(--tx1)' }} title={r.description}>{r.description || '—'}</td>
-                      <td style={{ fontFamily: 'var(--f-body)', fontSize: '0.68rem', color: 'var(--tx2)' }}>{r.counterparty || '—'}</td>
-                      <td style={{ fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--tx2)' }}>{fMat(r.maturityDate)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: '#FCD34D' }}>
-                        {r.couponRate != null ? `${(parseFloat(r.couponRate) * 100).toFixed(2)}%` : '—'}
+                    <tr
+                      key={r.isin + idx}
+                      style={{ background: rowBg }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background =
+                          "var(--tr-hover-bg)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background = rowBg)
+                      }
+                    >
+                      <td
+                        style={{
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: "#C084FC",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {r.isin}
                       </td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', fontWeight: 500 }}>
-                        {fN(parseFloat(r.nominalUsd || 0) / 1e6, 0)}<span style={{ color: 'var(--tx3)', fontSize: '0.58rem', marginLeft: 1 }}>M</span>
+                      <td
+                        style={{
+                          textAlign: "left",
+                          maxWidth: 160,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          fontSize: "0.70rem",
+                          color: "var(--tx1)",
+                        }}
+                        title={r.description}
+                      >
+                        {r.description || "—"}
                       </td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: pnlColor(r.plRealizedUsd) }}>{fUSD(r.plRealizedUsd)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: pnlColor(r.plLatentUsd) }}>{fUSD(r.plLatentUsd)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: pnlColor(r.plEcoMad), fontWeight: 700 }}>{fMAD(r.plEcoMad)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: 'var(--warn)' }}>{fUSD(r.fundingUsd)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontSize: '0.68rem', color: '#C084FC' }}>{fN(r.duration, 4)}</td>
+                      <td
+                        style={{
+                          fontFamily: "var(--f-body)",
+                          fontSize: "0.68rem",
+                          color: "var(--tx2)",
+                        }}
+                      >
+                        {r.counterparty || "—"}
+                      </td>
+                      <td
+                        style={{
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: "var(--tx2)",
+                        }}
+                      >
+                        {fMat(r.maturityDate)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: "#FCD34D",
+                        }}
+                      >
+                        {r.couponRate != null
+                          ? `${(parseFloat(r.couponRate) * 100).toFixed(2)}%`
+                          : "—"}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {fN(parseFloat(r.nominalUsd || 0) / 1e6, 0)}
+                        <span
+                          style={{
+                            color: "var(--tx3)",
+                            fontSize: "0.58rem",
+                            marginLeft: 1,
+                          }}
+                        >
+                          M
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: pnlColor(r.plRealizedUsd),
+                        }}
+                      >
+                        {fUSD(r.plRealizedUsd)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: pnlColor(r.plLatentUsd),
+                        }}
+                      >
+                        {fUSD(r.plLatentUsd)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: pnlColor(r.plEcoMad),
+                          fontWeight: 700,
+                        }}
+                      >
+                        {fMAD(r.plEcoMad)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: "var(--warn)",
+                        }}
+                      >
+                        {fUSD(r.fundingUsd)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.68rem",
+                          color: "#C084FC",
+                        }}
+                      >
+                        {fN(r.duration, 4)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -208,16 +578,85 @@ const CLNView = () => {
               {sorted.length > 0 && (
                 <tfoot>
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'left', fontFamily: 'var(--f-disp)', fontWeight: 700, fontSize: '0.60rem', letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--tx3)' }}>
-                      Total <span style={{ fontFamily: 'var(--f-mono)', color: '#C084FC' }}>({sorted.length})</span>
+                    <td
+                      colSpan={5}
+                      style={{
+                        textAlign: "left",
+                        fontFamily: "var(--f-disp)",
+                        fontWeight: 700,
+                        fontSize: "0.60rem",
+                        letterSpacing: "0.10em",
+                        textTransform: "uppercase",
+                        color: "var(--tx3)",
+                      }}
+                    >
+                      Total{" "}
+                      <span
+                        style={{
+                          fontFamily: "var(--f-mono)",
+                          color: "#C084FC",
+                        }}
+                      >
+                        ({sorted.length})
+                      </span>
                     </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', fontWeight: 600 }}>
-                      {(totals.nominalUsd / 1e6).toFixed(0)}<span style={{ color: 'var(--tx3)', fontSize: '0.58rem', marginLeft: 1 }}>M</span>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "var(--f-mono)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {(totals.nominalUsd / 1e6).toFixed(0)}
+                      <span
+                        style={{
+                          color: "var(--tx3)",
+                          fontSize: "0.58rem",
+                          marginLeft: 1,
+                        }}
+                      >
+                        M
+                      </span>
                     </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', color: pnlColor(totals.plRealizedUsd), fontWeight: 600 }}>{fUSD(totals.plRealizedUsd)}</td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', color: pnlColor(totals.plLatentUsd), fontWeight: 600 }}>{fUSD(totals.plLatentUsd)}</td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', color: pnlColor(totals.plEcoMad), fontWeight: 700 }}>{fMAD(totals.plEcoMad)}</td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--f-mono)', color: 'var(--warn)' }}>{fUSD(totals.fundingUsd)}</td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "var(--f-mono)",
+                        color: pnlColor(totals.plRealizedUsd),
+                        fontWeight: 600,
+                      }}
+                    >
+                      {fUSD(totals.plRealizedUsd)}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "var(--f-mono)",
+                        color: pnlColor(totals.plLatentUsd),
+                        fontWeight: 600,
+                      }}
+                    >
+                      {fUSD(totals.plLatentUsd)}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "var(--f-mono)",
+                        color: pnlColor(totals.plEcoMad),
+                        fontWeight: 700,
+                      }}
+                    >
+                      {fMAD(totals.plEcoMad)}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "var(--f-mono)",
+                        color: "var(--warn)",
+                      }}
+                    >
+                      {fUSD(totals.fundingUsd)}
+                    </td>
                     <td />
                   </tr>
                 </tfoot>
@@ -225,9 +664,20 @@ const CLNView = () => {
             </table>
           </div>
           {clnList.length === 0 && !loading && (
-            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--tx3)' }}>
-              <Shield size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
-              <p style={{ fontFamily: 'var(--f-body)', fontSize: '0.78rem' }}>Aucun snapshot CLN disponible</p>
+            <div
+              style={{
+                textAlign: "center",
+                padding: "48px",
+                color: "var(--tx3)",
+              }}
+            >
+              <Shield
+                size={28}
+                style={{ margin: "0 auto 10px", opacity: 0.3 }}
+              />
+              <p style={{ fontFamily: "var(--f-body)", fontSize: "0.78rem" }}>
+                Aucun snapshot CLN disponible
+              </p>
             </div>
           )}
         </div>

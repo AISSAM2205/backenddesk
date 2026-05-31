@@ -1,11 +1,11 @@
-import { Client } from '@stomp/stompjs';
+import { Client } from "@stomp/stompjs";
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
-const WS_URL = BASE.replace(/^http/, 'ws') + '/ws';
+const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const WS_URL = BASE.replace(/^http/, "ws") + "/ws";
 
 class WsService {
   constructor() {
-    this.client    = null;
+    this.client = null;
     this.listeners = new Set();
     this.connected = false;
   }
@@ -15,32 +15,32 @@ class WsService {
 
     this.client = new Client({
       brokerURL: WS_URL,
-      reconnectDelay:    5000,
+      reconnectDelay: 5000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
+      debug: (str) => console.log("[STOMP]", str),
 
       onConnect: () => {
         this.connected = true;
-        this._emit({ type: 'CONNECTION_STATUS', status: 'connected' });
-
-        this.client.subscribe('/topic/heartbeat', (message) => {
+        this._emit({ type: "CONNECTION_STATUS", status: "connected" });
+        this.client.subscribe("/topic/heartbeat", (message) => {
           try {
             const data = JSON.parse(message.body);
-            this._emit({ type: 'DATA', payload: data });
+            this._emit({ type: "DATA", payload: data });
           } catch {
-            this._emit({ type: 'DATA', payload: {} });
+            this._emit({ type: "DATA", payload: {} });
           }
         });
       },
 
       onDisconnect: () => {
         this.connected = false;
-        this._emit({ type: 'CONNECTION_STATUS', status: 'disconnected' });
+        this._emit({ type: "CONNECTION_STATUS", status: "disconnected" });
       },
 
       onStompError: () => {
         this.connected = false;
-        this._emit({ type: 'CONNECTION_STATUS', status: 'error' });
+        this._emit({ type: "CONNECTION_STATUS", status: "error" });
       },
     });
 
@@ -57,7 +57,7 @@ class WsService {
 
   ping() {
     if (this.client?.active) {
-      this.client.publish({ destination: '/app/ping', body: '{}' });
+      this.client.publish({ destination: "/app/ping", body: "{}" });
     }
   }
 
@@ -67,8 +67,12 @@ class WsService {
   }
 
   _emit(event) {
-    this.listeners.forEach(l => {
-      try { l(event); } catch { /* ignore */ }
+    this.listeners.forEach((l) => {
+      try {
+        l(event);
+      } catch {
+        /* ignore */
+      }
     });
   }
 }

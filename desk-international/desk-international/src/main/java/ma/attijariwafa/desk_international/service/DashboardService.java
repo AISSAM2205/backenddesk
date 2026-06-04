@@ -10,6 +10,8 @@ import ma.attijariwafa.desk_international.entity.VPosition;
 import ma.attijariwafa.desk_international.repository.MarketDataRepository;
 import ma.attijariwafa.desk_international.repository.VPositionRepository;
 import org.springframework.stereotype.Service;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.function.Function;
@@ -75,7 +77,9 @@ public class DashboardService {
                 .isin(pos.getIsin()).description(pos.getDescription())
                 .currency(pos.getCurrency()).subAsset(pos.getSubAsset())
                 .couponRate(pos.getCouponRate()).maturityDate(pos.getMaturityDate())
-                .netNominal(pos.getNetNominal()).lastWapDirty(pos.getLastWapDirty())
+                .netNominal(pos.getNetNominal())
+                .lastWapDirty(pos.getLastWapDirty())
+                .lastWapClean(pos.getLastWapClean())
                 .status(pos.getStatus())
                 .futuresNetPosition(pos.getFuturesNetPosition());
 
@@ -94,22 +98,38 @@ public class DashboardService {
                     .netDailyAlert(pnl.isNetDailyAlert());
         }
         if (mkt != null) {
+            BigDecimal iBid = mkt.getISpreadBid();
+            BigDecimal iAsk = mkt.getISpreadAsk();
+            BigDecimal iMid = (iBid != null && iAsk != null)
+                    ? iBid.add(iAsk).divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP)
+                    : (iBid != null ? iBid : iAsk);
             b.pxMid(mkt.getPxMid())
+             .cleanPrice(mkt.getPxMid())
+             .accrued(mkt.getAccrued())
              .pxBid(mkt.getPxBidAwb())
              .pxAsk(mkt.getPxAskAwb())
-             .iSpreadBid(mkt.getISpreadBid());
+             .iSpreadBid(iBid)
+             .iSpreadAsk(iAsk)
+             .iSpreadMid(iMid)
+             .assetSwapSpread(iBid);  // ASW ≈ I-spread bid pour ces bonds
         }
         if (pricing != null) {
             b.gSpreadBid(pricing.getGSpreadBid())
-                    .gSpreadMid(pricing.getGSpreadMid())
-                    .targetSpread(pricing.getTargetSpread())
-                    .decision(pricing.getDecision());
+             .gSpreadAsk(pricing.getGSpreadAsk())
+             .gSpreadMid(pricing.getGSpreadMid())
+             .historicalAvgSpread(pricing.getHistoricalAvgSpread())
+             .targetSpread(pricing.getTargetSpread())
+             .decision(pricing.getDecision());
         }
         if (risk != null) {
             b.modifiedDuration(risk.getModifiedDuration())
                     .dv01Bond(risk.getDv01Bond())
+                    .hedgeRatio(risk.getHedgeRatio())
                     .hedgeFuture(risk.getHedgeFuture())
-                    .nbContractsToHedge(risk.getNbContractsToHedge());
+                    .nbContractsToHedge(risk.getNbContractsToHedge())
+                    .currentFuturesPosition(risk.getCurrentFuturesPosition())
+                    .yieldToMaturity(risk.getYtmMid())
+                    .convexity(risk.getConvexity());
         }
         return b.build();
     }

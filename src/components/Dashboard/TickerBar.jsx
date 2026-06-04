@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useEffect, useState } from "react";
-import { useTrading } from "../../contexts/TradingContext";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTrading } from "../../contexts/TradingContext";
 
 /* ─── live clock ─────────────────────────────────────────────────── */
 const useClock = () => {
@@ -526,10 +526,15 @@ const TickerBar = () => {
   );
 
   const limitPct = useMemo(() => {
-    const nomMad = parseFloat(globalDashboard?.totalNominalMad || 0);
-    if (nomMad <= 0) return 0;
-    const limitMad = limitEur * (rates?.eurMad || 10.418);
-    return limitMad > 0 ? Math.min((nomMad / limitMad) * 100, 110) : 0;
+    // totalNominalMad contient en réalité des USD (nommé de manière trompeuse côté backend)
+    const nominalUsd = parseFloat(globalDashboard?.totalNominalMad || 0);
+    if (nominalUsd <= 0) return 0;
+    const usdMadRate = parseFloat(rates?.usdMad || 9.251);
+    const eurMadRate = parseFloat(rates?.eurMad || 10.418);
+    // Conversion cohérente : nominal USD → MAD, limite EUR → MAD
+    const nominalMad = nominalUsd * usdMadRate;
+    const limitMad   = limitEur   * eurMadRate;
+    return limitMad > 0 ? Math.min((nominalMad / limitMad) * 100, 110) : 0;
   }, [globalDashboard, limitEur, rates]);
 
   /* build item list — does NOT include session (clock-based, handled in renderItem) */
@@ -722,61 +727,76 @@ const TickerBar = () => {
       </div>
 
       {/* Left fade */}
-      <div
-        style={{
-          position: "absolute",
-          left: 57,
-          top: 0,
-          bottom: 0,
-          width: 32,
-          zIndex: 2,
-          background: "linear-gradient(to right, #020810, transparent)",
-          pointerEvents: "none",
-        }}
-      />
-      {/* Right fade */}
-      <div
-        style={{
-          position: "absolute",
-          right: 130,
-          top: 0,
-          bottom: 0,
-          width: 32,
-          zIndex: 2,
-          background: "linear-gradient(to left, #020810, transparent)",
-          pointerEvents: "none",
-        }}
-      />
 
       {/* Scrolling track */}
       <div
         ref={trackRef}
         style={{
+          position: "relative",
           display: "flex",
+          flex: "1 0 auto",
+          width: "100%",
+          overflow: "hidden",
+          flexShrink: 0,
           alignItems: "center",
           whiteSpace: "nowrap",
           height: "100%",
-          animation: `ticker-scroll ${animDur}s linear infinite`,
           willChange: "transform",
         }}
       >
-        <span style={{ display: "inline-flex", alignItems: "center" }}>
-          {segments}
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center" }}>
-          {segments}
-        </span>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 32,
+            zIndex: 2,
+            background: "linear-gradient(to right, #020810, transparent)",
+            pointerEvents: "none",
+          }}
+        />
+        {/* Right fade */}
+        <div
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 32,
+            zIndex: 2,
+            background: "linear-gradient(to left, #020810, transparent)",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          ref={trackRef}
+          style={{
+            position: "relative",
+            display: "flex",
+            flex: "1 0 auto",
+            flexShrink: 0,
+            alignItems: "center",
+            whiteSpace: "nowrap",
+            height: "100%",
+            animation: `ticker-scroll ${animDur}s linear infinite`,
+            willChange: "transform",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center" }}>
+            {segments}
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center" }}>
+            {segments}
+          </span>
+        </div>
       </div>
 
       {/* Right static panel: clock */}
       <div
         style={{
-          position: "absolute",
-          right: 0,
-          top: 0,
-          bottom: 0,
-          zIndex: 4,
           display: "flex",
+          flexShrink: 0,
           alignItems: "center",
           background: "#020810",
           borderLeft: `1px solid ${C.RED_LO}`,

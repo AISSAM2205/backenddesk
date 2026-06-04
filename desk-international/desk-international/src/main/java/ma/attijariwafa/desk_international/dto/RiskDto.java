@@ -41,6 +41,9 @@ public class RiskDto {
     // ex: -461 pour MOROC 5.95 (461 contrats vendus = hedge actif)
     private Integer    currentFuturesPosition;
 
-    // YTM (yield to maturity) en vigueur
+    // YTM (yield to maturity) en vigueur — stocké en % (ex: 5.72 pour 5.72%)
     private BigDecimal ytmMid;
+
+    // Convexité du bond (années²)
+    private BigDecimal convexity;
 }

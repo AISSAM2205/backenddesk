@@ -542,7 +542,7 @@ const FuturesView = () => {
                   <Th k="dv01Bond" label="DV01 $/bp" right />
                   <Th k="hedgeFuture" label="Future Hedge" />
                   <Th k="hedgeRatio" label="Ratio Hedge" right />
-                  <Th k="nbContractsToHedge" label="Contrats ∆" right />
+                  <Th k="nbContractsToHedge" label="Hedge à Passer" right />
                   <Th k="currentFuturesPosition" label="Pos. Actuelle" right />
                   <Th k="pnlEconomicMad" label="P&L Éco ★" right />
                 </tr>
@@ -622,7 +622,7 @@ const FuturesView = () => {
                           textAlign: "right",
                           fontFamily: "var(--f-mono)",
                           fontSize: "0.68rem",
-                          color: "#C084FC",
+                          color: "#60A5FA",
                         }}
                       >
                         {fN(r.modifiedDuration, 2)}
@@ -664,11 +664,44 @@ const FuturesView = () => {
                           textAlign: "right",
                           fontFamily: "var(--f-mono)",
                           fontSize: "0.68rem",
-                          fontWeight: 600,
-                          color: "var(--warn)",
                         }}
                       >
-                        {needed || "—"}
+                        {needed === 0 ? (
+                          <span style={{ color: "var(--tx3)" }}>—</span>
+                        ) : gap === 0 ? (
+                          <span
+                            style={{ color: "var(--profit)", fontWeight: 700 }}
+                          >
+                            ✓
+                          </span>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-end",
+                              gap: 1,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontWeight: 700,
+                                color:
+                                  gap > 0 ? "#34D399" : "var(--loss)",
+                              }}
+                            >
+                              {gap > 0 ? `+${gap}` : gap}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "0.55rem",
+                                color: "var(--tx3)",
+                              }}
+                            >
+                              cible&nbsp;{needed}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td
                         style={{

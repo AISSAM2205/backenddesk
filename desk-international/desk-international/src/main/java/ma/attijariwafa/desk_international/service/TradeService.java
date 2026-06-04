@@ -56,6 +56,7 @@ public class TradeService {
                 .gSpread(dto.getGSpread())
                 .counterparty(dto.getCounterparty())
                 .commissionType(dto.getCommissionType())
+                .tradeCategory(dto.getTradeCategory())
                 .isClosed(false).realizedPnl(ZERO)
                 .build();
 

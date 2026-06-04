@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Button } from "antd";
+import { Button, Card, Tag, Empty, Alert } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import {
   AlertTriangle,
@@ -39,26 +39,30 @@ const fMAD = (v, compact = false) => {
 const pnlColor = (v) =>
   parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)";
 
-/* ─── KPI Card ───────────────────────────────────────────────────── */
+/* ─── KPI Card (Ant Design Card) ────────────────────────────────── */
 const StatCard = ({ label, value, sub, valColor }) => (
-  <div
-    className="card"
-    style={{ flex: "1 1 140px", padding: "8px 10px", overflow: "hidden" }}
+  <Card
+    size="small"
+    style={{ flex: "1 1 140px", borderTop: `2px solid ${valColor || "var(--b1)"}` }}
+    styles={{ body: { padding: "8px 12px" } }}
   >
     <span
-      className="lbl"
       style={{
-        display: "block",
-        marginBottom: 5,
+        fontFamily: "var(--f-disp)",
         fontSize: "0.53rem",
+        fontWeight: 700,
         letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        color: "var(--tx3)",
+        display: "block",
+        marginBottom: 4,
       }}
     >
       {label}
     </span>
     <div
-      className="n"
       style={{
+        fontFamily: "var(--f-mono)",
         fontSize: "1.22rem",
         fontWeight: 600,
         lineHeight: 1,
@@ -76,12 +80,13 @@ const StatCard = ({ label, value, sub, valColor }) => (
           color: "var(--tx3)",
           marginTop: 5,
           lineHeight: 1.3,
+          marginBottom: 0,
         }}
       >
         {sub}
       </p>
     )}
-  </div>
+  </Card>
 );
 
 /* ─── DV01 Bar ───────────────────────────────────────────────────── */
@@ -257,10 +262,10 @@ const RiskView = () => {
                   borderRadius: 1,
                 }}
               />
-              <h2 className="view-title">Pricing &amp; Analytics</h2>
+              <h2 className="view-title">Risk &amp; Carry Analytics</h2>
             </div>
             <p className="view-sub" style={{ paddingLeft: 9 }}>
-              Carry · DV01 · Duration · Signaux Hedge — {selectedDate}
+              DV01 · Duration · Sensibilité aux Taux · Carry Net — {selectedDate}
             </p>
           </div>
         </div>
@@ -291,7 +296,7 @@ const RiskView = () => {
             label="Duration Modifiée"
             value={dur ? `${fN(dur, 4)} ans` : "—"}
             sub="Nominal-weighted"
-            valColor="#C084FC"
+            valColor="#60A5FA"
           />
           <StatCard
             label="DV01 Total Portfolio"
@@ -300,22 +305,34 @@ const RiskView = () => {
             valColor="#60A5FA"
           />
           <StatCard
-            label="Net Daily"
+            label="Net Daily ★"
             value={fMAD(netDaily, true)}
-            sub="Theta + Financement"
+            sub="Carry net Theta − Fin."
             valColor={pnlColor(netDaily)}
           />
           <StatCard
-            label="Coût Financement/j"
-            value={fMAD(funding, true)}
-            sub="Portage obligataire"
-            valColor="var(--warn)"
+            label="$ Convexity"
+            value={
+              totalConvexDollar > 0
+                ? `${fN(totalConvexDollar / 1e6, 2)} M USD`
+                : "—"
+            }
+            sub="Gain convexité +100bp"
+            valColor="#60A5FA"
           />
           <StatCard
-            label="Theta Coupon/j"
-            value={fMAD(theta, true)}
-            sub="Accrual quotidien"
-            valColor="var(--cyan)"
+            label="Alertes Carry"
+            value={
+              alerts.length > 0
+                ? `${alerts.length} pos.`
+                : "✓ OK"
+            }
+            sub={
+              alerts.length > 0
+                ? "Carry négatif — à surveiller"
+                : "Aucune position négative"
+            }
+            valColor={alerts.length > 0 ? "var(--loss)" : "var(--profit)"}
           />
           <StatCard
             label="Signaux BUY"
@@ -334,9 +351,10 @@ const RiskView = () => {
           style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}
         >
           {/* Rate Sensitivity Matrix */}
-          <div
-            className="card slide-up stagger-3"
-            style={{ padding: "14px 16px" }}
+          <Card
+            size="small"
+            className="slide-up stagger-3"
+            styles={{ body: { padding: "14px 16px" } }}
           >
             <div
               style={{
@@ -369,7 +387,7 @@ const RiskView = () => {
                       fontFamily: "var(--f-disp)",
                       fontSize: "0.55rem",
                       fontWeight: 700,
-                      color: "#C084FC",
+                      color: "#60A5FA",
                       padding: "2px 7px",
                       background: "rgba(192,132,252,0.08)",
                       borderRadius: 4,
@@ -460,7 +478,7 @@ const RiskView = () => {
                         style={{
                           fontFamily: "var(--f-mono)",
                           fontSize: "0.50rem",
-                          color: "#C084FC",
+                          color: "#60A5FA",
                           marginTop: 3,
                         }}
                       >
@@ -468,19 +486,6 @@ const RiskView = () => {
                         {(diffMad / 1e6).toFixed(2)}M
                       </div>
                     )}
-                    {/* Linear secondary */}
-                    <div
-                      style={{
-                        fontFamily: "var(--f-mono)",
-                        fontSize: "0.50rem",
-                        color: "var(--tx3)",
-                        marginTop: 2,
-                        opacity: 0.6,
-                      }}
-                    >
-                      lin. {pnlMadLin >= 0 ? "+" : ""}
-                      {(pnlMadLin / 1e6).toFixed(2)}M
-                    </div>
                     <div
                       style={{
                         height: 3,
@@ -505,25 +510,13 @@ const RiskView = () => {
                 );
               })}
             </div>
-            <p
-              style={{
-                fontFamily: "var(--f-body)",
-                fontSize: "0.57rem",
-                color: "var(--tx3)",
-                marginTop: 8,
-                textAlign: "right",
-                opacity: 0.6,
-              }}
-            >
-              ΔP ≈ −DV01×Δbp + ½·C·N·(Δbp/10000)² — valeur principale =
-              convexité ajustée
-            </p>
-          </div>
+          </Card>
 
           {/* Carry Attribution */}
-          <div
-            className="card slide-up stagger-3"
-            style={{ padding: "14px 16px" }}
+          <Card
+            size="small"
+            className="slide-up stagger-3"
+            styles={{ body: { padding: "14px 16px" } }}
           >
             <p className="sect-ttl" style={{ marginBottom: 12 }}>
               Attribution Carry / j
@@ -664,60 +657,25 @@ const RiskView = () => {
                 </div>
               </div>
             )}
-          </div>
+          </Card>
         </div>
 
         {/* ── Carry Alert Banner ── */}
         {alerts.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "10px 14px",
-              borderRadius: 8,
-              background: "rgba(255,43,96,0.06)",
-              border: "1px solid rgba(255,43,96,0.20)",
-              flexWrap: "wrap",
-            }}
-          >
-            <AlertTriangle
-              size={13}
-              style={{
-                color: "var(--loss)",
-                flexShrink: 0,
-                animation: "pulse-live 2s ease infinite",
-              }}
-            />
-            <span
-              style={{
-                fontFamily: "var(--f-disp)",
-                fontSize: "0.62rem",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "var(--loss)",
-              }}
-            >
-              {alerts.length} carry négatif :
-            </span>
-            <span
-              style={{
-                fontFamily: "var(--f-body)",
-                fontSize: "0.72rem",
-                color: "#FC8FA0",
-              }}
-            >
-              {alerts
-                .slice(0, 5)
-                .map((a) => a.description || a.isin)
-                .join(" · ")}
-            </span>
-          </div>
+          <Alert
+            type="error"
+            showIcon
+            message={`${alerts.length} position${alerts.length > 1 ? "s" : ""} · Carry négatif`}
+            description={alerts
+              .slice(0, 5)
+              .map((a) => a.description || a.isin)
+              .join(" · ")}
+            style={{ fontSize: "0.70rem" }}
+          />
         )}
 
         {/* ── DV01 / Carry Table ── */}
-        <div className="card" style={{ overflow: "hidden" }}>
+        <Card size="small" styles={{ body: { padding: 0, overflow: "hidden" } }}>
           <div
             style={{
               padding: "12px 16px",
@@ -741,47 +699,19 @@ const RiskView = () => {
               >
                 Analyse DV01 / Carry par ISIN
               </h3>
-              <span
-                style={{
-                  fontFamily: "var(--f-mono)",
-                  fontSize: "0.65rem",
-                  color: "var(--tx3)",
-                  padding: "2px 7px",
-                  background: "var(--elev)",
-                  borderRadius: 4,
-                  border: "1px solid var(--b1)",
-                }}
-              >
+              <Tag style={{ fontFamily: "var(--f-mono)", fontSize: "0.65rem" }}>
                 {rows.length} pos.
-              </span>
+              </Tag>
             </div>
             {rows.length > 20 && (
-              <button
+              <Button
+                size="small"
+                type="text"
+                icon={showAll ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 onClick={() => setShowAll((v) => !v)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "var(--f-body)",
-                  fontSize: "0.70rem",
-                  color: "var(--tx2)",
-                }}
               >
-                {showAll ? (
-                  <>
-                    <ChevronUp size={12} />
-                    Réduire
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown size={12} />
-                    Voir tout ({rows.length})
-                  </>
-                )}
-              </button>
+                {showAll ? "Réduire" : `Voir tout (${rows.length})`}
+              </Button>
             )}
           </div>
 
@@ -810,7 +740,7 @@ const RiskView = () => {
                   <Th k="targetSpread" label="Target bp" right />
                   <Th k="netDailyMad" label="Net Daily" right />
                   <Th k="cpnThetaMad" label="Theta/j" right />
-                  <Th k="fundingCostMad" label="Fin. MAD" right />
+                  <Th k="fundingCostMad" label="Fin./j MAD" right />
                   <Th k="pnlEconomicMad" label="P&L Éco ★" right />
                   <th
                     style={{
@@ -907,7 +837,7 @@ const RiskView = () => {
                           textAlign: "right",
                           fontFamily: "var(--f-mono)",
                           fontSize: "0.68rem",
-                          color: "#C084FC",
+                          color: "#60A5FA",
                         }}
                       >
                         {fN(r.modifiedDuration, 2)}
@@ -1093,7 +1023,7 @@ const RiskView = () => {
                     style={{
                       textAlign: "right",
                       fontFamily: "var(--f-mono)",
-                      color: "#C084FC",
+                      color: "#60A5FA",
                       fontWeight: 600,
                     }}
                   >
@@ -1157,25 +1087,19 @@ const RiskView = () => {
           </div>
 
           {rows.length === 0 && !loading && (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "48px",
-                color: "var(--tx3)",
-              }}
-            >
-              <Shield
-                size={28}
-                style={{ margin: "0 auto 10px", opacity: 0.3 }}
+            <div style={{ padding: "32px" }}>
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <span style={{ fontSize: "0.72rem", color: "var(--tx3)" }}>
+                    Aucune donnée de risque
+                  </span>
+                }
               />
-              <p style={{ fontFamily: "var(--f-body)", fontSize: "0.78rem" }}>
-                Aucune donnée de risque
-              </p>
             </div>
           )}
-        </div>
+        </Card>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };

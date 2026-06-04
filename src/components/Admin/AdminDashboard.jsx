@@ -110,7 +110,7 @@ const AdminDashboard = () => {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <img
-            src="/attijariwafa-logo.png"
+            src={isDark ? "/attijariwafa-dark.svg" : "/attijariwafa-light.svg"}
             alt=""
             style={{ height: 26, width: "auto", objectFit: "contain" }}
           />
@@ -154,7 +154,7 @@ const AdminDashboard = () => {
           <Dropdown
             trigger={["click"]}
             placement="bottomRight"
-            dropdownRender={() => (
+            popupRender={() => (
               <div
                 style={{
                   width: 248,

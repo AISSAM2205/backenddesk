@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { Eye, EyeOff, Lock, AlertCircle, User, ArrowRight } from "lucide-react";
+import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, User } from "lucide-react";
+import { useEffect, useState } from "react";
 import bgImage from "../../assets/login-bg.png";
+import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 
 /* ── Design tokens — contraste WCAG AA garanti ── */
 const T = {
@@ -21,6 +22,7 @@ const T = {
 const LoginForm = () => {
   const { login, loading, error, clearError, loginAsAdmin, loginAsTrader } =
     useAuth();
+  const { isDark } = useTheme();
   const [form, setForm] = useState({ username: "", password: "" });
   const [showPwd, setShowPwd] = useState(false);
   const [time, setTime] = useState(new Date());
@@ -227,7 +229,9 @@ const LoginForm = () => {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
             <img
-              src="/attijariwafa-logo.png"
+              src={
+                isDark ? "/attijariwafa-dark.svg" : "/attijariwafa-light.svg"
+              }
               alt="AWB"
               style={{ height: 24, width: "auto", objectFit: "contain" }}
             />

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Button } from "antd";
+import { Button, Input } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useAuth } from "../../../contexts/AuthContext";
 import {
@@ -650,18 +650,13 @@ const EGPView = () => {
           </span>
           {showSlInput ? (
             <>
-              <input
+              <Input
                 type="number"
                 value={slInput}
                 onChange={(e) => setSlInput(e.target.value)}
                 placeholder="ex: 5 (M MAD)"
-                className="field"
-                style={{
-                  width: 120,
-                  padding: "3px 8px",
-                  fontSize: "0.72rem",
-                  marginBottom: 0,
-                }}
+                size="small"
+                style={{ width: 120 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") saveStopLoss();
                   if (e.key === "Escape") setShowSlInput(false);
@@ -736,8 +731,10 @@ const EGPView = () => {
                     Math.round((new Date(r.maturityDate) - today) / 86400000),
                   )
                 : 90;
+              // wapFxEntry = USD/EGP au jour d'entrée en position (depuis ExternalPnlSnapshot)
+              // Fallback conservateur : spot actuel (pas de gain/perte FX latente → breakeven = spot)
               const fxEntry =
-                parseFloat(r.fxEntry || r.wapFxEntry || 0) || spot * 0.97;
+                parseFloat(r.wapFxEntry || r.fxEntry || 0) || spot;
               const bkvSansFin = fxEntry * (1 + (yieldRate * daysRem) / 360);
               const netCarry = yieldRate - sofr;
               const bkvAvecFin = fxEntry * (1 + (netCarry * daysRem) / 360);
@@ -810,7 +807,7 @@ const EGPView = () => {
                           ["Échéance / Jours", false],
                           ["Nominal M USD", true],
                           ["Rendement %", true],
-                          ["FX Entrée (mock)", true],
+                          ["FX Entrée (WAP)", true],
                           ["BKV s/fin", true],
                           ["BKV a/fin", true],
                           ["Coussin s/fin", true],
@@ -904,17 +901,8 @@ const EGPView = () => {
                             <td style={{ ...tdS, color: "#FCD34D" }}>
                               {(d.yieldRate * 100).toFixed(2)}%
                             </td>
-                            <td style={{ ...tdS, color: "var(--tx3)" }}>
+                            <td style={{ ...tdS, color: "var(--tx2)" }}>
                               {d.fxEntry.toFixed(2)}
-                              <span
-                                style={{
-                                  fontSize: "0.52rem",
-                                  color: "var(--tx3)",
-                                  marginLeft: 3,
-                                }}
-                              >
-                                mock
-                              </span>
                             </td>
                             <td style={{ ...tdS, color: "var(--cyan)" }}>
                               {d.bkvSansFin.toFixed(2)}
@@ -998,8 +986,7 @@ const EGPView = () => {
                       marginLeft: "auto",
                     }}
                   >
-                    ⚡ FX entrée = mock −3% · Connexion Bloomberg requise pour
-                    données réelles
+                    FX entrée = WAP USD/EGP au jour d'achat
                   </span>
                 </div>
               </div>

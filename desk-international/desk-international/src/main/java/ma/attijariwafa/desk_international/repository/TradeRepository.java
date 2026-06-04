@@ -59,4 +59,13 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
 
     // ✅ La bonne et unique version pour le WAP calculator !
     List<Trade> findByBondInstrumentIsinAndWayOrderByTradeDateAsc(String bondIsin, String way);
+
+    // Position nette futures pour un bond donné (hedBondIsin)
+    // SELL → négatif (contrats vendus = hedge short), BUY → positif
+    // Utilisé par RiskService pour remplacer VPosition.getFuturesNetPosition() (toujours 0)
+    @Query("SELECT COALESCE(SUM(CASE WHEN t.way = 'SELL' THEN -t.nbContracts " +
+           "ELSE t.nbContracts END), 0) " +
+           "FROM Trade t WHERE t.hedBondIsin = :isin " +
+           "AND t.isClosed = false AND t.nbContracts IS NOT NULL")
+    Integer findFuturesNetPositionByHedgeBond(@Param("isin") String isin);
 }

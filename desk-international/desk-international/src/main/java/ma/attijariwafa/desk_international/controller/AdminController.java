@@ -300,9 +300,13 @@ public class AdminController {
             m.put("spread",   0);
         }
         if ("egp".equals(type)) {
-            m.put("id",           i.getIsin());
-            m.put("yield",        i.getCouponRate());
-            m.put("duration_days", 182);
+            m.put("id",    i.getIsin());
+            m.put("yield", i.getCouponRate());
+            // Jours résiduels calculés depuis maturityDate — jamais hardcodé
+            long remainDays = i.getMaturityDate() != null
+                    ? java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), i.getMaturityDate())
+                    : 0L;
+            m.put("duration_days", Math.max(remainDays, 0L));
         }
         return m;
     }

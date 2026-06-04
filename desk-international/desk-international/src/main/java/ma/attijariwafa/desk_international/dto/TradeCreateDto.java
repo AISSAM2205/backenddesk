@@ -10,9 +10,10 @@ public class TradeCreateDto {
     // Commun
     private LocalDate  tradeDate;
     private LocalDate  valueDate;
-    private String     way;           // "BUY" ou "SELL"
+    private String     way;            // "BUY" ou "SELL"
     private String     counterparty;
     private String     commissionType;
+    private String     tradeCategory;  // "TRADING" | "MARKET_MAKING" | "MONTAGE"
 
     // Bond uniquement
     private String     isin;

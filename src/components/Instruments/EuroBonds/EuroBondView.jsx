@@ -5,8 +5,11 @@ import React, {
   useRef,
   useEffect,
 } from "react";
-import { Button } from "antd";
+import { Button, Select as AntSelect, Dropdown } from "antd";
+const { Option } = AntSelect;
+import * as XLSX from "xlsx";
 import { useTrading } from "../../../contexts/TradingContext";
+import api from "../../../services/api";
 import {
   AlertTriangle,
   Search,
@@ -15,6 +18,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Download,
+  FileSpreadsheet,
 } from "lucide-react";
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -56,6 +60,13 @@ const fMat = (d) => {
     return d;
   }
 };
+// Prix stockés en fraction décimale Bloomberg (1.0275 = 102.75 % du pair)
+const fPx = (v, d = 4) => {
+  if (v == null) return "—";
+  const n = parseFloat(v);
+  if (isNaN(n)) return "—";
+  return fN(n * 100, d);
+};
 const pnlColor = (v) =>
   parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)";
 
@@ -83,8 +94,8 @@ const GROUPS = [
   { label: "NOMINAL", span: 1, color: "rgba(100,116,139,0.5)" },
   { label: "PRICING", span: 6, color: "rgba(99,102,241,0.6)" },
   { label: "P&L — CCY", span: 4, color: "rgba(20,188,164,0.6)" },
-  { label: "P&L — MAD", span: 6, color: "rgba(0,232,153,0.6)" },
-  { label: "G-SPREAD (bp)", span: 3, color: "rgba(234,179,8,0.6)" },
+  { label: "P&L — MAD", span: 7, color: "rgba(0,232,153,0.6)" },
+  { label: "G-SPREAD (bp)", span: 5, color: "rgba(234,179,8,0.6)" },
   { label: "RENDEMENT", span: 2, color: "rgba(251,146,60,0.6)" },
   { label: "SIGNAL", span: 1, color: "rgba(100,116,139,0.5)" },
   { label: "RISQUE", span: 3, color: "rgba(155,62,239,0.6)" },
@@ -135,9 +146,18 @@ const COLS = [
     right: true,
     star: true,
   },
+  /* PnL MAD */ {
+    key: "expectedEcoPnlYe",
+    label: "Éco FY★",
+    right: true,
+    star: true,
+    noSort: false,
+  },
   /* Spread */ { key: "gSpreadBid", label: "Bid", right: true },
   /* Spread */ { key: "gSpreadMid", label: "Mid", right: true },
   /* Spread */ { key: "targetSpread", label: "Target", right: true },
+  /* Spread */ { key: "gSpreadYtd", label: "GSpd YTD", right: true },
+  /* Spread */ { key: "iSpreadYtd", label: "ISpd YTD", right: true },
   /* Rendmt */ { key: "yieldToMaturity", label: "YTM %", right: true },
   /* Rendmt */ { key: "assetSwapSpread", label: "ASW bp", right: true },
   /* Signal */ { key: "decision", label: "Signal", right: false, noSort: true },
@@ -247,6 +267,60 @@ const SortIcon = ({ active, dir }) => {
   );
 };
 
+/* ─── Decision inline editor ─────────────────────────────────────── */
+const DECISION_OPTS = [
+  { value: "", label: "—" },
+  { value: "BUY", label: "▲ BUY" },
+  { value: "HOLD", label: "— HOLD" },
+  { value: "SELL", label: "▼ SELL" },
+];
+
+const DecisionSelect = ({ isin, current }) => {
+  const [val, setVal] = useState(current ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setVal(current ?? "");
+  }, [current]);
+
+  const color =
+    val === "BUY"
+      ? "var(--profit)"
+      : val === "SELL"
+        ? "var(--loss)"
+        : val === "HOLD"
+          ? "var(--warn)"
+          : "var(--tx3)";
+
+  return (
+    <AntSelect
+      value={val}
+      onChange={async (newVal) => {
+        const prev = val;
+        setVal(newVal);
+        setSaving(true);
+        try {
+          await api.pricing.updateDecision(isin, newVal || null);
+        } catch {
+          setVal(prev);
+        } finally {
+          setSaving(false);
+        }
+      }}
+      disabled={saving}
+      size="small"
+      style={{ width: 90, color }}
+      popupMatchSelectWidth={false}
+    >
+      {DECISION_OPTS.map((o) => (
+        <Option key={o.value} value={o.value}>
+          {o.label}
+        </Option>
+      ))}
+    </AntSelect>
+  );
+};
+
 /* ─── Table Row ──────────────────────────────────────────────────── */
 const Row = ({ r, idx }) => {
   const flash = useFlash(r.dirtyMarket);
@@ -340,11 +414,11 @@ const Row = ({ r, idx }) => {
           M
         </span>
       </td>
-      <td style={{ ...nb, color: "var(--tx2)" }}>{fN(r.cleanPrice, 4)}</td>
-      <td style={{ ...nb, color: "var(--tx2)" }}>{fN(r.accrued, 4)}</td>
-      <td style={{ ...nb, color: "var(--tx3)" }}>{fN(r.lastWapClean, 4)}</td>
-      <td style={{ ...nb, color: "var(--tx2)" }}>{fN(r.lastWapDirty, 4)}</td>
-      <td style={{ ...nb }}>{fN(r.dirtyMarket, 4)}</td>
+      <td style={{ ...nb, color: "var(--tx2)" }}>{fPx(r.cleanPrice)}</td>
+      <td style={{ ...nb, color: "var(--tx2)" }}>{fPx(r.accrued)}</td>
+      <td style={{ ...nb, color: "var(--tx3)" }}>{fPx(r.lastWapClean)}</td>
+      <td style={{ ...nb, color: "var(--tx2)" }}>{fPx(r.lastWapDirty)}</td>
+      <td style={{ ...nb }}>{fPx(r.dirtyMarket)}</td>
       <td style={{ ...nb, color: pnlColor(parseFloat(r.perfWap || 0) * 100) }}>
         {r.perfWap != null ? fPct(parseFloat(r.perfWap) * 100, 3) : "—"}
       </td>
@@ -384,6 +458,17 @@ const Row = ({ r, idx }) => {
       <td style={{ ...nb, color: "var(--tx2)" }}>{fMAD(r.dailyFundingMad)}</td>
       <td style={{ ...nb, color: pnlColor(r.netDailyMad), fontWeight: 600 }}>
         {fMAD(r.netDailyMad)}
+      </td>
+      <td
+        style={{
+          ...nb,
+          color: pnlColor(r.expectedEcoPnlYe),
+          fontWeight: 700,
+          opacity: 0.85,
+        }}
+        title="Projection P&L Éco fin d'année = P&L actuel + carry net × jours restants"
+      >
+        {fMAD(r.expectedEcoPnlYe)}
       </td>
       <td style={{ ...nb, color: "#FCD34D" }}>
         {fN(r.gSpreadBid, 1)}
@@ -451,16 +536,28 @@ const Row = ({ r, idx }) => {
           "—"
         )}
       </td>
+      <td
+        style={{ ...nb, color: "var(--tx3)" }}
+        title="G-Spread au 01/01 — référence YTD (Bloomberg)"
+      >
+        {r.gSpreadYtd != null ? fN(r.gSpreadYtd, 1) : "—"}
+      </td>
+      <td
+        style={{ ...nb, color: "var(--tx3)" }}
+        title="I-Spread au 01/01 — référence YTD (Bloomberg)"
+      >
+        {r.iSpreadYtd != null ? fN(r.iSpreadYtd, 1) : "—"}
+      </td>
       <td style={{ ...nb, color: "#FCD34D" }}>
         {r.yieldToMaturity != null ? fN(r.yieldToMaturity, 3) + "%" : "—"}
       </td>
       <td style={{ ...nb, color: "#FCD34D" }}>{fN(r.assetSwapSpread, 1)}</td>
       <td style={{ ...td, textAlign: "center" }}>
-        <Signal row={r} />
+        <DecisionSelect isin={r.isin} current={r.decision} />
       </td>
-      <td style={{ ...nb, color: "#C084FC" }}>{fN(r.modifiedDuration, 2)}</td>
+      <td style={{ ...nb, color: "#60A5FA" }}>{fN(r.modifiedDuration, 2)}</td>
       <td style={{ ...nb, color: "#60A5FA" }}>{fN(r.dv01Bond, 0)}</td>
-      <td style={{ ...nb, color: "#C084FC" }}>{fN(r.convexity, 4)}</td>
+      <td style={{ ...nb, color: "#60A5FA" }}>{fN(r.convexity, 4)}</td>
       <td
         style={{
           ...td,
@@ -561,17 +658,135 @@ const EuroBondView = () => {
     return n.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
   };
 
+  const TEXT_KEYS = new Set([
+    "isin", "description", "subAsset", "maturityDate",
+    "currency", "decision", "hedgeFuture",
+  ]);
+
+  /* ── Excel export (.xlsx) ── */
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    /* ── Sheet 1 : Positions ── */
+    const hdr = COLS.map((c) => c.label);
+    const dataRows = sorted.map((r) =>
+      COLS.map((c) => {
+        const v = r[c.key];
+        if (v == null || v === "") return "";
+        if (!TEXT_KEYS.has(c.key)) {
+          const n = parseFloat(v);
+          if (!isNaN(n)) return n;          // nombre natif → Excel calcule
+        }
+        return String(v);
+      }),
+    );
+    const wsPos = XLSX.utils.aoa_to_sheet([hdr, ...dataRows]);
+
+    // Figer la première ligne (headers) + largeurs colonnes
+    wsPos["!freeze"] = { xSplit: 0, ySplit: 1 };
+    wsPos["!cols"] = COLS.map((c) =>
+      ({ wch: Math.max(c.label.length + 2, c.key === "description" ? 28 : c.key === "isin" ? 16 : 12) }),
+    );
+
+    // Ligne de totaux en bas
+    const totalRow = COLS.map((c) => {
+      if (c.key === "isin") return `TOTAL (${sorted.length})`;
+      if (c.key === "netNominal") return totals.nominal;
+      if (c.key === "pnlEconomicMad") return totals.pnlEco;
+      if (c.key === "pnlAccountingMad") return totals.pnlAcct;
+      if (c.key === "netDailyMad") return totals.netDaily;
+      if (c.key === "dv01Bond") return totals.dv01;
+      return "";
+    });
+    XLSX.utils.sheet_add_aoa(wsPos, [totalRow], { origin: -1 });
+    XLSX.utils.book_append_sheet(wb, wsPos, "Positions");
+
+    /* ── Sheet 2 : Synthèse ── */
+    const bd = globalDashboard?.breakdown || {};
+    const synth = [
+      ["DASHBOARD SYNTHÈSE — " + selectedDate, ""],
+      ["", ""],
+      ["INDICATEUR", "VALEUR (MAD)"],
+      ["P&L Économique", totals.pnlEco],
+      ["P&L Comptable", totals.pnlAcct],
+      ["Net Daily (Carry)", totals.netDaily],
+      ["Nominal Total (USD)", totals.nominal],
+      ["DV01 Portfolio ($)", totals.dv01],
+      ["", ""],
+      ["PAR CLASSE D'ACTIF", "P&L Éco MAD"],
+      ["Eurobonds", parseFloat(bd.EUROBOND?.plEcoMad || 0)],
+      ["CLN", parseFloat(bd.CLN?.plEcoMad || 0)],
+      ["EGP Bills", parseFloat(bd.EGP_BILL?.plEcoMad || 0)],
+      ["", ""],
+      ["ATTRIBUTION P&L", ""],
+      ["Latent (MtM)", parseFloat(globalDashboard?.totalPlLatentMad || 0)],
+      ["Réalisé", parseFloat(globalDashboard?.totalPlRealizedMad || 0)],
+      ["Coupons YTD", parseFloat(globalDashboard?.totalCouponsMad || 0)],
+      ["Coût Financement", parseFloat(globalDashboard?.totalFundingCostMad || 0)],
+      ["Theta Coupon/j", parseFloat(globalDashboard?.totalCpnThetaMad || 0)],
+    ];
+    const wsSynth = XLSX.utils.aoa_to_sheet(synth);
+    wsSynth["!cols"] = [{ wch: 30 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsSynth, "Synthèse");
+
+    /* ── Sheet 3 : Risques ── */
+    const riskRows = [
+      ["ISIN", "Obligation", "Dur. Mod.", "DV01 $", "Convexité", "Nominal M", "Net Daily MAD"],
+      ...sorted.map((r) => [
+        r.isin || "",
+        r.description || "",
+        parseFloat(r.modifiedDuration) || "",
+        parseFloat(r.dv01Bond) || "",
+        parseFloat(r.convexity) || "",
+        parseFloat(r.netNominal || 0) / 1e6,
+        parseFloat(r.netDailyMad) || "",
+      ]),
+    ];
+    const wsRisk = XLSX.utils.aoa_to_sheet(riskRows);
+    wsRisk["!freeze"] = { xSplit: 0, ySplit: 1 };
+    wsRisk["!cols"] = [
+      { wch: 16 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsRisk, "Risques");
+
+    /* ── Sheet 4 : G-Spreads ── */
+    const spreadRows = [
+      ["ISIN", "Obligation", "G-Spd Bid", "G-Spd Mid", "Target", "Gap (bp)", "I-Spread", "ASW", "YTM %", "Signal"],
+      ...sorted
+        .filter((r) => r.gSpreadBid != null || r.gSpreadMid != null)
+        .map((r) => {
+          const gap = r.gSpreadBid != null && r.targetSpread != null
+            ? parseFloat(r.gSpreadBid) - parseFloat(r.targetSpread)
+            : "";
+          return [
+            r.isin || "",
+            r.description || "",
+            parseFloat(r.gSpreadBid) || "",
+            parseFloat(r.gSpreadMid) || "",
+            parseFloat(r.targetSpread) || "",
+            gap,
+            parseFloat(r.iSpreadBid) || "",
+            parseFloat(r.assetSwapSpread) || "",
+            parseFloat(r.yieldToMaturity) || "",
+            r.decision || "",
+          ];
+        }),
+    ];
+    const wsSpread = XLSX.utils.aoa_to_sheet(spreadRows);
+    wsSpread["!freeze"] = { xSplit: 0, ySplit: 1 };
+    wsSpread["!cols"] = [
+      { wch: 16 }, { wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsSpread, "G-Spreads");
+
+    const ts = new Date().toISOString().slice(0, 16).replace("T", "_").replace(":", "h");
+    XLSX.writeFile(wb, `eurobonds_${selectedDate}_${ts}.xlsx`);
+  };
+
+  /* ── CSV export (backup) ── */
   const exportCsv = () => {
-    const BOM = "﻿"; // UTF-8 BOM — required for Excel to handle accented chars correctly
-    const TEXT_KEYS = new Set([
-      "isin",
-      "description",
-      "subAsset",
-      "maturityDate",
-      "currency",
-      "decision",
-      "hedgeFuture",
-    ]);
+    const BOM = "﻿";
     const esc = (v) => {
       const s = String(v ?? "");
       return s.includes(";") || s.includes('"') || s.includes("\n")
@@ -586,7 +801,7 @@ const EuroBondView = () => {
           if (v == null || v === "") return "";
           if (!TEXT_KEYS.has(c.key)) {
             const n = parseFloat(v);
-            if (!isNaN(n)) return String(n);
+            if (!isNaN(n)) return String(n).replace(".", ",");
           }
           return esc(String(v));
         }).join(";"),
@@ -651,13 +866,29 @@ const EuroBondView = () => {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Button
-              size="small"
-              onClick={exportCsv}
-              icon={<Download size={10} />}
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "xlsx",
+                    label: "Excel (.xlsx) — recommandé",
+                    icon: <FileSpreadsheet size={12} />,
+                    onClick: exportExcel,
+                  },
+                  {
+                    key: "csv",
+                    label: "CSV UTF-8 (backup)",
+                    icon: <Download size={12} />,
+                    onClick: exportCsv,
+                  },
+                ],
+              }}
+              trigger={["click"]}
             >
-              Export CSV
-            </Button>
+              <Button size="small" icon={<FileSpreadsheet size={10} />}>
+                Exporter ▾
+              </Button>
+            </Dropdown>
             <Button
               size="small"
               loading={loading}
@@ -734,19 +965,18 @@ const EuroBondView = () => {
           ))}
 
           {currencies.length > 1 && (
-            <select
+            <AntSelect
               value={filterCcy}
-              onChange={(e) => setFilterCcy(e.target.value)}
-              className="select"
-              style={{ height: 24, borderRadius: 3 }}
+              onChange={(v) => setFilterCcy(v)}
+              size="small"
+              style={{ width: 110 }}
+              popupMatchSelectWidth={false}
             >
-              <option value="ALL">Toutes CCY</option>
+              <Option value="ALL">Toutes CCY</Option>
               {currencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
+                <Option key={c} value={c}>{c}</Option>
               ))}
-            </select>
+            </AntSelect>
           )}
         </div>
       </div>

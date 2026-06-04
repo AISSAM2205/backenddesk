@@ -7,11 +7,14 @@ import ma.attijariwafa.desk_international.repository.*;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import ma.attijariwafa.desk_international.repository.TBillPositionRepository;
@@ -27,18 +30,21 @@ import ma.attijariwafa.desk_international.repository.TBillPositionRepository;
 @RequiredArgsConstructor
 public class BloombergMockDataLoader implements ApplicationRunner {
 
-    private final InstrumentRepository     instrumentRepo;
-    private final MarketRatesRepository    marketRatesRepo;
-    private final MarketDataRepository     marketDataRepo;
-    private final RiskMetricsRepository    riskMetricsRepo;
-    private final PricingConfigRepository  pricingConfigRepo;
-    private final TradeRepository          tradeRepo;
-    private final CouponReceivedRepository couponRepo;
-    private final AppUserRepository        userRepo;
-    private final PortfolioLimitRepository limitRepo;
-    private final TraderLimitRepository    traderLimitRepo;
-    private final PnlDailyRepository       pnlDailyRepo;
-    private final TBillPositionRepository  tbillRepo;
+    private final InstrumentRepository              instrumentRepo;
+    private final MarketRatesRepository             marketRatesRepo;
+    private final MarketDataRepository              marketDataRepo;
+    private final RiskMetricsRepository             riskMetricsRepo;
+    private final PricingConfigRepository           pricingConfigRepo;
+    private final TradeRepository                   tradeRepo;
+    private final CouponReceivedRepository          couponRepo;
+    private final AppUserRepository                 userRepo;
+    private final PortfolioLimitRepository          limitRepo;
+    private final TraderLimitRepository             traderLimitRepo;
+    private final PnlDailyRepository                pnlDailyRepo;
+    private final TBillPositionRepository           tbillRepo;
+    private final ExternalPnlSnapshotRepository     extSnapshotRepo;
+    private final AuditLogRepository                auditLogRepo;
+    private final JdbcTemplate                      jdbcTemplate;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -50,6 +56,8 @@ public class BloombergMockDataLoader implements ApplicationRunner {
         }
         log.info("[Bloomberg Mock] Chargement données de démonstration pour {}...", today);
         // Purge all existing data to avoid duplicate key errors on re-seed
+        auditLogRepo.deleteAll();
+        extSnapshotRepo.deleteAll();
         pnlDailyRepo.deleteAll();
         couponRepo.deleteAll();
         tradeRepo.deleteAll();
@@ -74,7 +82,9 @@ public class BloombergMockDataLoader implements ApplicationRunner {
         seedCoupons(ins);
         seedPnlDaily(today);
         seedTBills(today);
-        log.info("[Bloomberg Mock] ✓ 10 instruments · 13 trades · 15 coupons · 3 T-Bills · 8 limits · 4 trader-limits chargés.");
+        seedExternalSnapshots(today);
+        seedAuditLog(today);
+        log.info("[Bloomberg Mock] ✓ 11 instruments · 13 trades · 15 coupons · 3 T-Bills · 8 limits · 5 traders · external snapshots · 12 audit logs chargés.");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -89,9 +99,10 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             inst("XS2337058901", "OCP 3.75 06/23/2031",      "OCP SA",   "USD", "OCP Bond", "3.7500", (short)2, LocalDate.of(2031,6,23),  LocalDate.of(2021,6,9),    700_000_000L),
             inst("XS1743523562", "OCP 5.625 04/25/2048",     "OCP SA",   "USD", "OCP Bond", "5.6250", (short)2, LocalDate.of(2048,4,25),  LocalDate.of(2018,4,25),   500_000_000L),
             inst("XS2398769001", "MOROC 3.50 09/16/2031",    "MOROCCO",  "EUR", "Mor Bond", "3.5000", (short)1, LocalDate.of(2031,9,16),  LocalDate.of(2021,9,16),  1_000_000_000L),
-            inst("XS2400000001", "CLN MOROC 5.00 05/15/2027","AWB DESK", "USD", "CLN MOROC","5.0000", (short)2, LocalDate.of(2027,5,15),  LocalDate.of(2024,5,15),   100_000_000L),
-            inst("EG0000123456", "EGP T-Bill 91J",            "EGYPT",    "EGP", "EGP Bill", "0.0000", (short)4, today.plusDays(61),       today.minusDays(30),       500_000_000L),
-            inst("EG0000654321", "EGP T-Bill 182J",           "EGYPT",    "EGP", "EGP Bill", "0.0000", (short)2, today.plusDays(152),      today.minusDays(30),       300_000_000L)
+            inst("XS2400000001", "CLN MOROC 5.00 05/15/2027","AWB DESK",     "USD", "CLN MOROC","5.0000", (short)2, LocalDate.of(2027,5,15),  LocalDate.of(2024,5,15),   100_000_000L),
+            inst("XS2500000002", "CLN SAUDI ARAMCO 4.75 2028","SAUDI ARAMCO","USD", "CLN GCC",  "4.7500", (short)2, LocalDate.of(2028,3,20),  LocalDate.of(2025,3,20),   500_000_000L),
+            inst("EG0000123456", "EGP T-Bill 91J",            "EGYPT",        "EGP", "EGP Bill", "0.0000", (short)4, today.plusDays(61),       today.minusDays(30),       500_000_000L),
+            inst("EG0000654321", "EGP T-Bill 182J",           "EGYPT",        "EGP", "EGP Bill", "0.0000", (short)2, today.plusDays(152),      today.minusDays(30),       300_000_000L)
         );
         List<Instrument> saved = instrumentRepo.saveAll(list);
         Map<String, Instrument> map = new LinkedHashMap<>();
@@ -123,7 +134,13 @@ public class BloombergMockDataLoader implements ApplicationRunner {
                 .fullName("Administrateur Système").isActive(true).build(),
             AppUser.builder().username("direction").email("direction@attijariwafa.ma")
                 .passwordHash(enc.encode("AWB2025!")).role("READONLY")
-                .fullName("Direction Financière").isActive(true).build()
+                .fullName("Direction Financière").isActive(true).build(),
+            AppUser.builder().username("maitif").email("m.aitif@attijariwafa.ma")
+                .passwordHash(enc.encode("AWB2025!")).role("TRADER")
+                .fullName("Mohamed Aitif").isActive(true).build(),
+            AppUser.builder().username("hbenali").email("h.benali@attijariwafa.ma")
+                .passwordHash(enc.encode("AWB2025!")).role("TRADER")
+                .fullName("Hassan Benali").isActive(true).build()
         );
         List<AppUser> toInsert = candidates.stream()
                 .filter(u -> !existing.contains(u.getUsername()))
@@ -141,7 +158,7 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             lim("Eurobonds (EUR)", "EXPOSURE", "EUR", "EUROBONDS", "var(--eb)",  "280.00", "7.00", eff),
             lim("CLN Maroc (USD)", "EXPOSURE", "USD", "CLN_MOROC", "var(--cln)", "50.00",  "5.00", eff),
             lim("CLN GCC (USD)",   "EXPOSURE", "USD", "CLN_GCC",   "#7C3AED",    "30.00",  "5.00", eff),
-            lim("EGP Bills (USD)", "EXPOSURE", "USD", "EGP_BILLS", "var(--egp)", "20.00",  "3.00", eff),
+            lim("EGP Bills (USD)", "EXPOSURE", "USD", "EGP_BILLS", "var(--egp)", "20.00",  "1.00", eff),
             // Annual P&L targets (USD millions)
             lim("Eurobond Maroc",  "TARGET",   "USD", "MOROC",     "var(--eb)",  "35.00",  null,   eff),
             lim("Eurobond OCP",    "TARGET",   "USD", "OCP",       "#9B3EEF",    "15.00",  null,   eff),
@@ -160,24 +177,58 @@ public class BloombergMockDataLoader implements ApplicationRunner {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 3b. PER-TRADER LIMITS
+    // 3b. PER-TRADER LIMITS (all users, with realistic used_amount from positions)
+    //
+    // Exposed amounts derived from seeded trades:
+    //   EUROBONDS EUR: XS2189848XT7 10M EUR + XS2398769001 8M EUR = 18 000 000 EUR
+    //   CLN_MOROC USD: XS2400000001 3 000 000 USD
+    //   EGP USD equiv: EG0000123456 50M EGP / 48.85 ≈ 1 023 541 USD
     // ─────────────────────────────────────────────────────────────────────────
     private void seedTraderLimits() {
-        userRepo.findByUsernameAndIsActiveTrue("trader").ifPresent(trader ->
+        // "trader" — lead trader, carries EUR bond book + CLN + EGP
+        userRepo.findByUsernameAndIsActiveTrue("trader").ifPresent(u ->
             traderLimitRepo.saveAll(List.of(
-                tl(trader, "EUROBONDS", "50000000", "EUR"),
-                tl(trader, "CLN_MOROC", "20000000", "USD"),
-                tl(trader, "CLN_GCC",   "15000000", "USD"),
-                tl(trader, "EGP",       "10000000", "USD")
+                tl(u, "EUROBONDS", "50000000",  "18000000", "EUR"),
+                tl(u, "CLN_MOROC", "20000000",  "3000000",  "USD"),
+                tl(u, "CLN_GCC",   "15000000",  "0",        "USD"),
+                tl(u, "EGP",       "10000000",  "1023541",  "USD")
             ))
         );
+        // "maitif" — senior trader, manages most of the USD bond book
+        userRepo.findByUsernameAndIsActiveTrue("maitif").ifPresent(u ->
+            traderLimitRepo.saveAll(List.of(
+                tl(u, "EUROBONDS", "80000000",  "43460000", "EUR"),
+                tl(u, "CLN_MOROC", "25000000",  "3000000",  "USD"),
+                tl(u, "CLN_GCC",   "20000000",  "0",        "USD"),
+                tl(u, "EGP",       "10000000",  "0",        "USD")
+            ))
+        );
+        // "hbenali" — junior trader, small USD book + EGP follow-up
+        userRepo.findByUsernameAndIsActiveTrue("hbenali").ifPresent(u ->
+            traderLimitRepo.saveAll(List.of(
+                tl(u, "EUROBONDS", "30000000",  "8000000",  "EUR"),
+                tl(u, "CLN_MOROC", "10000000",  "0",        "USD"),
+                tl(u, "CLN_GCC",   "10000000",  "0",        "USD"),
+                tl(u, "EGP",       "5000000",   "1023541",  "USD")
+            ))
+        );
+        // "admin" — admin oversight limits (aggregated view)
+        userRepo.findByUsernameAndIsActiveTrue("admin").ifPresent(u ->
+            traderLimitRepo.saveAll(List.of(
+                tl(u, "EUROBONDS", "280000000", "109460000","EUR"),
+                tl(u, "CLN_MOROC", "50000000",  "3000000",  "USD"),
+                tl(u, "CLN_GCC",   "30000000",  "0",        "USD"),
+                tl(u, "EGP",       "20000000",  "2047082",  "USD")
+            ))
+        );
+        // "direction" has no trading limits — READONLY user
     }
 
-    private static TraderLimit tl(AppUser user, String type, String amount, String ccy) {
+    private static TraderLimit tl(AppUser user, String type, String limit, String used, String ccy) {
         return TraderLimit.builder()
             .user(user).instrumentType(type)
-            .limitAmount(new BigDecimal(amount))
-            .usedAmount(BigDecimal.ZERO)
+            .limitAmount(new BigDecimal(limit))
+            .usedAmount(new BigDecimal(used))
             .currency(ccy).build();
     }
 
@@ -195,9 +246,10 @@ public class BloombergMockDataLoader implements ApplicationRunner {
                         .eurMad(new BigDecimal("10.889100"))
                         .usdMad(new BigDecimal("10.034700"))
                         .eurUsd(new BigDecimal("1.085100"))
-                        .estrRate(new BigDecimal("0.039000"))
-                        .sofrRate(new BigDecimal("0.053300"))
+                        .estrRate(new BigDecimal("3.9000"))   // stocké en % : 3.90%
+                        .sofrRate(new BigDecimal("5.3300"))   // stocké en % : 5.33%
                         .usdEgp(new BigDecimal("48.850000"))
+                        .cbeRate(new BigDecimal("27.2500"))   // taux directeur CBE, en % : 27.25%
                         .shockBps(10).build());
                 count++;
             }
@@ -220,6 +272,7 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             md(ins.get("XS1743523562"), today, "0.947500","0.023440","0.941500","0.935500","235.0","225.0","208.0","198.0"),
             md(ins.get("XS2398769001"), today, "0.938500","0.011270","0.933000","0.927500","145.0","137.0","128.0","120.0"),
             md(ins.get("XS2400000001"), today, "1.012500","0.012500","1.007500","1.002000","155.0","145.0","138.0","128.0"),
+            md(ins.get("XS2500000002"), today, "1.005000","0.011875","0.999500","0.994000","188.0","178.0","162.0","152.0"),
             md(ins.get("EG0000123456"), today, "0.985900","0.000000","0.984900","0.983900","0.0",  "0.0",  "0.0",  "0.0"),
             md(ins.get("EG0000654321"), today, "0.972000","0.000000","0.971000","0.970000","0.0",  "0.0",  "0.0",  "0.0")
         );
@@ -241,34 +294,39 @@ public class BloombergMockDataLoader implements ApplicationRunner {
     // 6. RISK METRICS
     // ─────────────────────────────────────────────────────────────────────────
     private void seedRiskMetrics(Map<String, Instrument> ins, LocalDate today) {
-        //                        isin               modDur  dv01PerM  ytm        hedge   ctdIsin          durCtd    convFact  contractSize
+        // modDur   dv01PerM  ytm(%)   hedge   ctdIsin         durCtd   convFact  contractSize  convexity
         List<RiskMetrics> list = List.of(
-            rm(ins.get("XS2595028452"), today, "2.795300","5.320000","0.057200","FVZ5","US91282CME36","4.230000","0.936300",100000),
-            rm(ins.get("XS2080771806"), today, "5.314200","7.971300","0.061400","TYZ5","US91282CKT73","8.210000","0.721400",100000),
-            rm(ins.get("XS2368905890"), today,"14.230000","7.115000","0.061500","TYZ5","US91282CKT73","8.210000","0.721400",100000),
-            rm(ins.get("XS2189848XT7"), today, "3.950000","3.950000","0.044500","RXZ5","DE0001102580","6.120000","0.887500",100000),
-            rm(ins.get("XS2337058901"), today, "4.620000","4.620000","0.059900","FVZ5","US91282CME36","4.230000","0.936300",100000),
-            rm(ins.get("XS1743523562"), today,"13.050000","3.915000","0.060100","TYZ5","US91282CKT73","8.210000","0.721400",100000),
-            rm(ins.get("XS2398769001"), today, "4.720000","3.776000","0.045800","RXZ5","DE0001102580","6.120000","0.887500",100000),
-            rm(ins.get("XS2400000001"), today, "1.250000","0.375000","0.046500", null,  null,           null,      null,     100000),
-            rm(ins.get("EG0000123456"), today, "0.240000","0.012000","0.245000", null,  null,           null,      null,     100000),
-            rm(ins.get("EG0000654321"), today, "0.470000","0.014100","0.250000", null,  null,           null,      null,     100000)
+            rm(ins.get("XS2595028452"), today,"2.795300","5.320000","5.7200","FVZ5","US91282CME36","4.230000","0.936300",100000,"9.50"),
+            rm(ins.get("XS2080771806"), today,"5.314200","7.971300","6.1400","TYZ5","US91282CKT73","8.210000","0.721400",100000,"36.50"),
+            rm(ins.get("XS2368905890"), today,"14.23000","7.115000","6.1500","TYZ5","US91282CKT73","8.210000","0.721400",100000,"285.0"),
+            rm(ins.get("XS2189848XT7"), today,"3.950000","3.950000","4.4500","RXZ5","DE0001102580","6.120000","0.887500",100000,"18.50"),
+            rm(ins.get("XS2337058901"), today,"4.620000","4.620000","5.9900","FVZ5","US91282CME36","4.230000","0.936300",100000,"27.00"),
+            rm(ins.get("XS1743523562"), today,"13.05000","3.915000","6.0100","TYZ5","US91282CKT73","8.210000","0.721400",100000,"218.0"),
+            rm(ins.get("XS2398769001"), today,"4.720000","3.776000","4.5800","RXZ5","DE0001102580","6.120000","0.887500",100000,"27.50"),
+            rm(ins.get("XS2400000001"), today,"1.250000","0.375000","4.6500", null,  null,           null,      null,     100000,"1.80"),
+            rm(ins.get("XS2500000002"), today,"1.680000","0.504000","5.1200", null,  null,           null,      null,     100000,"3.20"),
+            rm(ins.get("EG0000123456"), today,"0.240000","0.012000","24.500", null,  null,           null,      null,     100000,"0.07"),
+            rm(ins.get("EG0000654321"), today,"0.470000","0.014100","25.000", null,  null,           null,      null,     100000,"0.25")
         );
         riskMetricsRepo.saveAll(list);
     }
 
     private static RiskMetrics rm(Instrument inst, LocalDate date,
-                                   String modDur, String dv01PerM, String ytm,
+                                   String modDur, String dv01PerM,
+                                   String ytm,        // en % : ex "5.7200" pour 5.72%
                                    String hedgeFut, String ctdIsin,
-                                   String durCtd, String convFact, int contractSize) {
+                                   String durCtd, String convFact, int contractSize,
+                                   String convexity) {
         return RiskMetrics.builder().instrument(inst).metricsDate(date)
                 .modifiedDuration(new BigDecimal(modDur))
                 .dv01PerMillion(new BigDecimal(dv01PerM))
                 .ytmMid(new BigDecimal(ytm))
                 .hedgeFuture(hedgeFut).ctdIsin(ctdIsin)
-                .durationCtd(durCtd  != null ? new BigDecimal(durCtd)  : null)
-                .convFactor( convFact != null ? new BigDecimal(convFact) : null)
-                .contractSize(contractSize).build();
+                .durationCtd(durCtd    != null ? new BigDecimal(durCtd)    : null)
+                .convFactor( convFact  != null ? new BigDecimal(convFact)  : null)
+                .contractSize(contractSize)
+                .convexity(convexity   != null ? new BigDecimal(convexity) : null)
+                .build();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -285,6 +343,7 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             pc(ins.get("XS1743523562"), today, "235.0","225.0","230.0","225.0","BUY"),
             pc(ins.get("XS2398769001"), today, "145.0","137.0","141.0","148.0","HOLD"),
             pc(ins.get("XS2400000001"), today, "155.0","145.0","150.0","148.0","BUY"),
+            pc(ins.get("XS2500000002"), today, "188.0","178.0","183.0","180.0","HOLD"),
             pc(ins.get("EG0000123456"), today,   "0.0",  "0.0",  "0.0",  "0.0","HOLD"),
             pc(ins.get("EG0000654321"), today,   "0.0",  "0.0",  "0.0",  "0.0","HOLD")
         );
@@ -540,6 +599,187 @@ public class BloombergMockDataLoader implements ApplicationRunner {
                 .maturityDate(maturity).dateInitiation(dateInit)
                 .limitNominal(new BigDecimal(limit))
                 .build();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 13. EXTERNAL PNL SNAPSHOTS  (CLN desk structuré + EGP desk local)
+    //     Ces snapshots alimentent /api/external/cln et /api/external/egp
+    //     utilisés par le frontend pour pnl.cln et pnl.egp.
+    //     Valeurs calculées sur la base des positions seedées : WAP, prix marché,
+    //     coupons reçus et coût de financement SOFR/ESTR au 31/05/2026.
+    // ─────────────────────────────────────────────────────────────────────────
+    private void seedExternalSnapshots(LocalDate today) {
+        List<ExternalPnlSnapshot> list = new ArrayList<>();
+
+        // ── CLN MOROC 5.00 05/15/2027 — 3 000 000 USD ──────────────────────
+        // WAP dirty = 1.020000 | Marché dirty = 1.025000
+        // Latent = 3M × (1.025 - 1.020) = +15 000 USD
+        // Coupons reçus : May-2025 + Nov-2025 = 2 × 75 000 = +150 000 USD
+        // P&L total USD = 165 000
+        // Funding (SOFR 5.33% · 152j/360) = 3M × 0.0533 × 0.4222 = 67 600 USD
+        // P&L éco USD = 97 400 | × USD/MAD 10.034 = 977 312 MAD ≈ 977 000 MAD
+        list.add(ExternalPnlSnapshot.builder()
+                .isin("XS2400000001")
+                .description("CLN MOROC 5.00 05/15/2027")
+                .assetCategory("CLN")
+                .snapshotDate(today)
+                .nominalUsd(new BigDecimal("3000000"))
+                .couponRate(new BigDecimal("0.050000"))
+                .counterparty("AWB Internal / Desk Structuré")
+                .maturityDate(LocalDate.of(2027, 5, 15))
+                .plRealizedUsd(BigDecimal.ZERO)
+                .plLatentUsd(new BigDecimal("15000.00"))
+                .plEcoUsd(new BigDecimal("97400.00"))
+                .plEcoMad(new BigDecimal("977312.00"))
+                .fundingUsd(new BigDecimal("-67600.00"))
+                .duration(new BigDecimal("1.2500"))
+                .source("MOCK_BLOOMBERG")
+                .build());
+
+        // ── EGP T-Bill 91J — 50 000 000 EGP (≈ 1 023 541 USD) ──────────────
+        // WAP = 0.939000 | Marché = 0.985900 (accrété vers pair)
+        // Latent EGP = 50M × (0.9859 - 0.939) = +2 345 000 EGP
+        // EGP/MAD = USD/MAD ÷ USD/EGP = 10.034 / 48.85 = 0.20538
+        // P&L éco MAD ≈ 2 345 000 × 0.20538 = +481 615 MAD ≈ 481 600 MAD
+        // couponRate = yield implicite T-bill 91J = 24.50% → stocké en fraction (0.245000)
+        // wapFxEntry = USD/EGP au jour d'achat (il y a 30j) = 48.850000 (taux constant mock)
+        list.add(ExternalPnlSnapshot.builder()
+                .isin("EG0000123456")
+                .description("EGP T-Bill 91J")
+                .assetCategory("EGP_BILL")
+                .snapshotDate(today)
+                .nominalUsd(new BigDecimal("1023541.00"))
+                .couponRate(new BigDecimal("0.245000"))
+                .wapFxEntry(new BigDecimal("48.850000"))
+                .counterparty("Banque Misr")
+                .maturityDate(today.plusDays(61))
+                .plRealizedUsd(BigDecimal.ZERO)
+                .plLatentUsd(new BigDecimal("48056.00"))
+                .plEcoUsd(new BigDecimal("48056.00"))
+                .plEcoMad(new BigDecimal("481615.00"))
+                .fundingUsd(BigDecimal.ZERO)
+                .duration(new BigDecimal("0.2500"))
+                .source("MOCK_BLOOMBERG")
+                .build());
+
+        // ── EGP T-Bill 182J — 30 000 000 EGP (≈ 614 125 USD) ───────────────
+        // WAP = 0.960000 | Marché = 0.972000
+        // Latent EGP = 30M × (0.972 - 0.960) = +360 000 EGP
+        // P&L éco MAD ≈ 360 000 × 0.20538 = +73 937 MAD ≈ 73 900 MAD
+        // couponRate = yield implicite T-bill 182J = 25.00% → stocké en fraction (0.250000)
+        // wapFxEntry = USD/EGP au jour d'achat = 48.850000
+        list.add(ExternalPnlSnapshot.builder()
+                .isin("EG0000654321")
+                .description("EGP T-Bill 182J")
+                .assetCategory("EGP_BILL")
+                .snapshotDate(today)
+                .nominalUsd(new BigDecimal("614125.00"))
+                .couponRate(new BigDecimal("0.250000"))
+                .wapFxEntry(new BigDecimal("48.850000"))
+                .counterparty("CIB Egypt")
+                .maturityDate(today.plusDays(152))
+                .plRealizedUsd(BigDecimal.ZERO)
+                .plLatentUsd(new BigDecimal("7390.00"))
+                .plEcoUsd(new BigDecimal("7390.00"))
+                .plEcoMad(new BigDecimal("73937.00"))
+                .fundingUsd(BigDecimal.ZERO)
+                .duration(new BigDecimal("0.4700"))
+                .source("MOCK_BLOOMBERG")
+                .build());
+
+        extSnapshotRepo.saveAll(list);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 14. AUDIT LOG  (12 entrées historiques réalistes)
+    //
+    //     @PrePersist dans AuditLog écrase toujours createdAt = now().
+    //     On bypasse JPA en utilisant JdbcTemplate (INSERT natif PostgreSQL)
+    //     pour pouvoir seeder des timestamps historiques exacts.
+    //     La colonne created_at est déclarée updatable=false côté Hibernate,
+    //     mais un INSERT natif n'est pas soumis à cette contrainte.
+    // ─────────────────────────────────────────────────────────────────────────
+    private void seedAuditLog(LocalDate today) {
+        final String SQL =
+            "INSERT INTO audit_log (username, table_name, action, record_id, details, ip_address, created_at) " +
+            "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)";
+        // Base = minuit aujourd'hui, les timestamps sont calculés en jours passés + heure
+        LocalDateTime base = today.atStartOfDay();
+
+        // 1 — Création des instruments Eurobonds (il y a 30 jours, 09h00)
+        jdbcTemplate.update(SQL, "admin", "instrument", "INSERT", null,
+            json("isin","XS2595028452","description","MOROC 5.95 2031","action","creation instrument"),
+            null, ts(base, 30, 9));
+
+        // 2 — Création instrument CLN Maroc (il y a 28 jours, 10h30)
+        jdbcTemplate.update(SQL, "admin", "instrument", "INSERT", null,
+            json("isin","XS2400000001","description","CLN MOROC 5.00 2027","action","creation instrument"),
+            null, ts(base, 28, 10));
+
+        // 3 — Création instrument CLN GCC (il y a 22 jours, 11h00)
+        jdbcTemplate.update(SQL, "admin", "instrument", "INSERT", null,
+            json("isin","XS2500000002","description","CLN SAUDI ARAMCO 4.75 2028","action","creation instrument"),
+            null, ts(base, 22, 11));
+
+        // 4 — Création compte trader Mohamed Aitif (il y a 25 jours, 09h15)
+        jdbcTemplate.update(SQL, "admin", "app_user", "INSERT", null,
+            json("username","maitif","fullName","Mohamed Aitif","role","TRADER"),
+            null, ts(base, 25, 9));
+
+        // 5 — Création compte trader Hassan Benali (il y a 25 jours, 09h30)
+        jdbcTemplate.update(SQL, "admin", "app_user", "INSERT", null,
+            json("username","hbenali","fullName","Hassan Benali","role","TRADER"),
+            null, ts(base, 25, 9));
+
+        // 6 — Trade BUY MOROC 5.95 — Mohamed Aitif (il y a 20 jours, 08h45)
+        jdbcTemplate.update(SQL, "maitif", "trade", "INSERT", 1L,
+            json("isin","XS2595028452","nominal","50000000","way","BUY","gSpread","141.00"),
+            "10.0.2.45", ts(base, 20, 8));
+
+        // 7 — Trade BUY MOROC 3.00 — Hassan Benali (il y a 18 jours, 08h50)
+        jdbcTemplate.update(SQL, "hbenali", "trade", "INSERT", 3L,
+            json("isin","XS2080771806","nominal","15000000","way","BUY","gSpread","180.00"),
+            "10.0.2.46", ts(base, 18, 8));
+
+        // 8 — Mise à jour limite EUROBONDS du trader maitif (il y a 15 jours, 14h00)
+        jdbcTemplate.update(SQL, "admin", "trader_limit", "UPDATE", null,
+            json("user","maitif","instrumentType","EUROBONDS","from","40000000","to","80000000","currency","EUR"),
+            null, ts(base, 15, 14));
+
+        // 9 — Mise à jour limite portefeuille Eurobonds (il y a 10 jours, 16h00)
+        jdbcTemplate.update(SQL, "admin", "portfolio_limit", "UPDATE", null,
+            json("portfolioName","Eurobonds (EUR)","field","limitMeur","from","250.00","to","280.00"),
+            null, ts(base, 10, 16));
+
+        // 10 — Import CSV blotter (il y a 5 jours, 09h05)
+        jdbcTemplate.update(SQL, "trader", "csv_upload", "IMPORT", null,
+            json("file","blotter_20260527.csv","imported","60","errors","0","source","Bloomberg"),
+            "10.0.2.43", ts(base, 5, 9));
+
+        // 11 — Trade BUY OCP 5.625 — Hassan Benali (il y a 2 jours, 08h55)
+        jdbcTemplate.update(SQL, "hbenali", "trade", "INSERT", 7L,
+            json("isin","XS1743523562","nominal","3000000","way","BUY","gSpread","228.00"),
+            "10.0.2.46", ts(base, 2, 8));
+
+        // 12 — Réactivation compte direction (hier, 11h00)
+        jdbcTemplate.update(SQL, "admin", "app_user", "UPDATE", null,
+            json("username","direction","field","isActive","from","false","to","true"),
+            null, ts(base, 1, 11));
+    }
+
+    /** Construit un timestamp SQL à partir d'une base minuit moins N jours à heure H. */
+    private static Timestamp ts(LocalDateTime base, int minusDays, int hour) {
+        return Timestamp.valueOf(base.minusDays(minusDays).withHour(hour).withMinute(0).withSecond(0));
+    }
+
+    /** Sérialise des paires clé/valeur en JSON string pour la colonne JSONB. */
+    private static String json(String... kv) {
+        StringBuilder b = new StringBuilder("{");
+        for (int i = 0; i + 1 < kv.length; i += 2) {
+            if (i > 0) b.append(',');
+            b.append('"').append(kv[i]).append("\":\"").append(kv[i + 1]).append('"');
+        }
+        return b.append('}').toString();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -25,6 +25,9 @@ public class PricingDto {
     private BigDecimal iSpreadAsk;
     private BigDecimal iSpreadMid;
 
+    // Moyenne historique du G-Spread — contexte pour la décision BUY/HOLD
+    private BigDecimal historicalAvgSpread;
+
     // Target spread = seuil historique moyen + choc 10 bps
     private BigDecimal targetSpread; // ex: 140.38 bps pour MOROC 5.95
 

@@ -35,6 +35,11 @@ public class MarketRates {
     @Column(name = "usd_egp", precision = 10, scale = 4)
     private BigDecimal usdEgp;
 
+    // Taux directeur CBE (banque centrale égyptienne), stocké en % : ex 27.2500
+    // Sert au calcul de la courbe NDF EGP/USD forward implicite.
+    @Column(name = "cbe_rate", precision = 10, scale = 4)
+    private BigDecimal cbeRate;
+
     @Column(name = "shock_bps", nullable = false)
     private Integer shockBps = 10;
 
@@ -50,5 +55,10 @@ public class MarketRates {
 
     public BigDecimal getEstr() {
         return this.estrRate;
+    }
+
+    // Expose la clé JSON "egpOvernightRate" attendue par le frontend (courbe NDF EGP)
+    public BigDecimal getEgpOvernightRate() {
+        return this.cbeRate;
     }
 }

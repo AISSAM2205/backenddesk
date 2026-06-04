@@ -56,6 +56,11 @@ public class ExternalPnlSnapshot {
     @Column(name = "duration", precision = 8, scale = 4)
     private BigDecimal duration;
 
+    // Taux USD/EGP au moment de l'entrée en position (WAP)
+    // Utilisé par EGPView pour calculer le FX Breakeven réel
+    @Column(name = "wap_fx_entry", precision = 14, scale = 6)
+    private BigDecimal wapFxEntry;
+
     @Column(name = "source", length = 50)
     private String source;
 

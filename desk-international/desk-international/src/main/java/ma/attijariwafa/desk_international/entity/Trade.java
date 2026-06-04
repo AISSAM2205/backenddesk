@@ -46,6 +46,10 @@ public class Trade {
     @Column(name = "commission_type", length = 50)
     private String commissionType;
 
+    // Catégorie d'opération : TRADING | MARKET_MAKING | MONTAGE
+    @Column(name = "trade_category", length = 30)
+    private String tradeCategory;
+
     @Column(name = "clean_price", precision = 15, scale = 10)
     private BigDecimal cleanPrice;
 

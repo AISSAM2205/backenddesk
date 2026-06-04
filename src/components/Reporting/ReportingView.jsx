@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback } from "react";
-import { Button } from "antd";
+import { Button, Card, Tabs, Progress, Tag, Alert, Statistic, Tooltip, Badge, Divider } from "antd";
+import * as XLSX from "xlsx";
 import { useTrading } from "../../contexts/TradingContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useAdmin } from "../../contexts/AdminContext";
@@ -18,9 +19,271 @@ import {
   AlertTriangle,
   Printer,
   Sliders,
+  Sun,
+  Clock,
+  CheckCircle,
 } from "lucide-react";
 
+/* ─── Waterfall / P&L Bridge Chart ──────────────────────────────── */
+const WaterfallChart = ({ carry, latent, realized, funding, net }) => {
+  const W = 580, H = 190, pL = 60, pR = 16, pT = 20, pB = 40;
+  const cW = W - pL - pR, cH = H - pT - pB;
+
+  // funding here is a COST (positive = reduces P&L)
+  const segs = [
+    { label: "Carry / Theta", value: carry,    bot: 0,                          top: carry,                                   color: carry >= 0 ? "#22C55E" : "#EF4444" },
+    { label: "Latent MTM",    value: latent,   bot: carry,                      top: carry + latent,                           color: latent >= 0 ? "#22C55E" : "#EF4444" },
+    { label: "Réalisé",       value: realized, bot: carry + latent,             top: carry + latent + realized,                color: realized >= 0 ? "#22C55E" : "#EF4444" },
+    { label: "Financement",   value: -funding, bot: carry + latent + realized,  top: carry + latent + realized - funding,      color: "#F59E0B" },
+    { label: "NET ÉCO.",      value: net,      bot: 0,                          top: net,                                      color: net >= 0 ? "#22C55E" : "#EF4444", isTotal: true },
+  ];
+
+  const allVals = segs.flatMap(s => [s.bot, s.top, 0]);
+  const minV = Math.min(...allVals);
+  const maxV = Math.max(...allVals);
+  const span = (maxV - minV) || 1;
+  const lo = minV - span * 0.12;
+  const hi = maxV + span * 0.12;
+  const range = hi - lo;
+
+  const toY = v => pT + ((hi - v) / range) * cH;
+  const zeroY = toY(0);
+  const barSlot = cW / segs.length;
+  const barW = barSlot * 0.54;
+  const gap = (barSlot - barW) / 2;
+
+  const yticks = [-0.5, 0, 0.5, 1].map(f => lo + f * range).filter(v => v >= lo && v <= hi);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, display: "block" }}>
+      {yticks.map((v, i) => (
+        <g key={i}>
+          <line x1={pL} x2={W - pR} y1={toY(v)} y2={toY(v)} stroke="var(--chart-grid)" strokeWidth={0.8} strokeDasharray="3,5" />
+          <text x={pL - 5} y={toY(v) + 3.5} textAnchor="end" fill="var(--tx3)" fontSize={8} fontFamily="JetBrains Mono,monospace">
+            {v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v <= -1e6 ? `${(v/1e6).toFixed(1)}M` : "0"}
+          </text>
+        </g>
+      ))}
+      <line x1={pL} x2={W - pR} y1={zeroY} y2={zeroY} stroke="var(--chart-axis)" strokeWidth={1.2} />
+      <line x1={pL} x2={pL} y1={pT} y2={H - pB} stroke="var(--chart-axis)" strokeWidth={1} />
+
+      {segs.map((s, i) => {
+        const x = pL + i * barSlot + gap;
+        const yTop = toY(Math.max(s.bot, s.top));
+        const yBot = toY(Math.min(s.bot, s.top));
+        const bh = Math.max(Math.abs(yBot - yTop), 2);
+        const nextSeg = segs[i + 1];
+        const connectorY = toY(s.top);
+        return (
+          <g key={s.label}>
+            {s.isTotal && (
+              <line x1={x - gap * 1.5} x2={x - gap * 1.5} y1={pT} y2={H - pB}
+                stroke="var(--b2)" strokeWidth={1} strokeDasharray="2,5" />
+            )}
+            {!s.isTotal && nextSeg && (
+              <line x1={x + barW} x2={pL + (i + 1) * barSlot + gap} y1={connectorY} y2={connectorY}
+                stroke="var(--tx3)" strokeWidth={0.8} strokeDasharray="3,3" opacity={0.5} />
+            )}
+            <rect x={x} y={yTop} width={barW} height={bh} fill={s.color} opacity={s.isTotal ? 0.92 : 0.78} rx={2}
+              style={{ transition: "height 0.7s ease, y 0.7s ease" }} />
+            <text x={x + barW / 2} y={yTop - 5} textAnchor="middle" fill={s.color}
+              fontSize={8.5} fontFamily="JetBrains Mono,monospace" fontWeight={700}>
+              {s.value >= 0 ? "+" : ""}{(s.value / 1e6).toFixed(1)}M
+            </text>
+            <text x={x + barW / 2} y={H - pB + 14} textAnchor="middle" fill={s.isTotal ? "var(--tx1)" : "var(--tx3)"}
+              fontSize={s.isTotal ? 8 : 7.5} fontFamily="Syne,sans-serif" fontWeight={s.isTotal ? 700 : 400} letterSpacing={0.3}>
+              {s.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+/* ─── Cumulative P&L vs Target trajectory ───────────────────────── */
+const CumulativePnlChart = ({ history, target }) => {
+  const [hover, setHover] = useState(null);
+  const svgRef = React.useRef();
+
+  const W = 800, H = 190, pL = 68, pR = 24, pT = 20, pB = 34;
+  const cW = W - pL - pR, cH = H - pT - pB;
+
+  const sorted = useMemo(() =>
+    [...(history || [])].sort((a, b) => (a.snapshotDate || "").localeCompare(b.snapshotDate || "")),
+  [history]);
+
+  const points = useMemo(() => {
+    if (sorted.length < 2) return [];
+    const year = sorted[0]?.snapshotDate?.substring(0, 4) || new Date().getFullYear().toString();
+    const yearStart = new Date(`${year}-01-01`).getTime();
+    const yearEnd   = new Date(`${year}-12-31`).getTime();
+    const yearSpan  = yearEnd - yearStart || 1;
+    return sorted.map(d => ({
+      x: pL + ((new Date(d.snapshotDate).getTime() - yearStart) / yearSpan) * cW,
+      val: parseFloat(d.pnlEcoMad || 0),
+      date: d.snapshotDate,
+    })).map(p => ({ ...p, rawX: p.x }));
+  }, [sorted, cW]);
+
+  const allVals = useMemo(() => {
+    const vals = points.map(p => p.val);
+    return [...vals, 0, target];
+  }, [points, target]);
+
+  const minV = Math.min(...allVals);
+  const maxV = Math.max(...allVals);
+  const span = (maxV - minV) || 1;
+  const lo = minV - span * 0.08;
+  const hi = maxV + span * 0.12;
+  const range = hi - lo;
+
+  const toY = v => pT + ((hi - v) / range) * cH;
+
+  const ptsWithY = points.map(p => ({ ...p, y: toY(p.val) }));
+  const lastPt = ptsWithY[ptsWithY.length - 1];
+  const firstPt = ptsWithY[0];
+  const isAhead = lastPt && points.length > 0
+    ? lastPt.val > target * ((lastPt.rawX - pL) / cW)
+    : false;
+
+  const linePath = ptsWithY.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const year = sorted[0]?.snapshotDate?.substring(0, 4) || new Date().getFullYear().toString();
+  const targetEndX = pL + cW;
+  const targetPath = `M${pL},${toY(0)} L${targetEndX},${toY(target)}`;
+
+  const areaPath = linePath + ` L${lastPt?.x || pL},${toY(0)} L${pL},${toY(0)} Z`;
+
+  const handleMove = useCallback(e => {
+    if (!svgRef.current || !ptsWithY.length) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (W / rect.width);
+    let ci = 0, minD = Infinity;
+    ptsWithY.forEach((p, i) => { const d = Math.abs(p.x - mx); if (d < minD) { minD = d; ci = i; } });
+    setHover(ptsWithY[ci]);
+  }, [ptsWithY]);
+
+  if (sorted.length < 2) return (
+    <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--tx3)", fontSize: "0.72rem" }}>
+      Historique insuffisant pour le graphique cumulatif
+    </div>
+  );
+
+  const yticks = [0, 0.25, 0.5, 0.75, 1].map(f => lo + f * range);
+  const qtrs = [{ l: "Jan", f: 0 }, { l: "Avr", f: 0.25 }, { l: "Jul", f: 0.5 }, { l: "Oct", f: 0.75 }, { l: "Déc", f: 1 }];
+  const actColor = isAhead ? "#22C55E" : "#60A5FA";
+
+  return (
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, cursor: "crosshair", display: "block" }}
+      onMouseMove={handleMove} onMouseLeave={() => setHover(null)}>
+      <defs>
+        <linearGradient id="cumAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={actColor} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={actColor} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      {yticks.map((v, i) => (
+        <g key={i}>
+          <line x1={pL} x2={W - pR} y1={toY(v)} y2={toY(v)} stroke="var(--chart-grid)" strokeWidth={0.8} strokeDasharray="3,5" />
+          <text x={pL - 6} y={toY(v) + 3.5} textAnchor="end" fill="var(--tx3)" fontSize={8.5} fontFamily="JetBrains Mono,monospace">
+            {v >= 1e9 ? `${(v/1e9).toFixed(1)}Md` : v >= 1e6 ? `${(v/1e6).toFixed(0)}M` : v <= -1e6 ? `${(v/1e6).toFixed(0)}M` : "0"}
+          </text>
+        </g>
+      ))}
+      <line x1={pL} x2={pL} y1={pT} y2={H - pB} stroke="var(--chart-axis)" strokeWidth={1} />
+      <line x1={pL} x2={W - pR} y1={H - pB} y2={H - pB} stroke="var(--chart-axis)" strokeWidth={1} />
+      {qtrs.map(q => (
+        <text key={q.l} x={pL + q.f * cW} y={H - pB + 14} textAnchor="middle" fill="var(--tx3)" fontSize={8} fontFamily="JetBrains Mono,monospace">{q.l}</text>
+      ))}
+      <path d={targetPath} fill="none" stroke="var(--warn)" strokeWidth={1.5} strokeDasharray="7,4" opacity={0.7} />
+      <text x={targetEndX - 4} y={toY(target) - 7} textAnchor="end" fill="var(--warn)" fontSize={8} fontFamily="JetBrains Mono,monospace">
+        Objectif {(target / 1e6).toFixed(0)}M MAD
+      </text>
+      {ptsWithY.length > 1 && <path d={areaPath} fill="url(#cumAreaGrad)" />}
+      {ptsWithY.length > 1 && <path d={linePath} fill="none" stroke={actColor} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+      {lastPt && (
+        <>
+          <circle cx={lastPt.x} cy={lastPt.y} r={4} fill={actColor} stroke="var(--void)" strokeWidth={2} />
+          <text x={Math.min(lastPt.x + 10, W - pR - 60)} y={lastPt.y + 4} fill={actColor} fontSize={9.5} fontFamily="JetBrains Mono,monospace" fontWeight={700}>
+            {(lastPt.val / 1e6).toFixed(1)}M
+          </text>
+        </>
+      )}
+      {hover && (
+        <>
+          <line x1={hover.x} x2={hover.x} y1={pT} y2={H - pB} stroke="var(--tx2)" strokeWidth={1} strokeDasharray="3,3" strokeOpacity={0.5} />
+          <circle cx={hover.x} cy={hover.y} r={4} fill={actColor} stroke="var(--void)" strokeWidth={2} />
+          <g transform={`translate(${Math.min(hover.x + 10, W - 144)},${Math.max(hover.y - 38, pT)})`}>
+            <rect width={134} height={34} rx={5} fill="rgba(5,18,34,0.95)" stroke={`${actColor}55`} strokeWidth={1} />
+            <text x={9} y={13} fill="rgba(156,163,175,0.9)" fontSize={7.5} fontFamily="JetBrains Mono,monospace">{hover.date}</text>
+            <text x={9} y={26} fill={actColor} fontSize={10} fontFamily="JetBrains Mono,monospace" fontWeight={700}>
+              {hover.val >= 0 ? "+" : ""}{(hover.val / 1e6).toFixed(2)}M MAD
+            </text>
+          </g>
+        </>
+      )}
+    </svg>
+  );
+};
+
+/* ─── Drawdown Chart ─────────────────────────────────────────────── */
+const DrawdownChart = ({ history }) => {
+  const W = 800, H = 100, pL = 68, pR = 24, pT = 12, pB = 24;
+  const cW = W - pL - pR, cH = H - pT - pB;
+
+  const data = useMemo(() => {
+    const sorted = [...(history || [])].sort((a, b) => (a.snapshotDate || "").localeCompare(b.snapshotDate || ""));
+    if (sorted.length < 2) return [];
+    const year = sorted[0]?.snapshotDate?.substring(0, 4) || new Date().getFullYear().toString();
+    const yearStart = new Date(`${year}-01-01`).getTime();
+    const yearSpan = new Date(`${year}-12-31`).getTime() - yearStart || 1;
+    let peak = -Infinity;
+    return sorted.map(d => {
+      const v = parseFloat(d.pnlEcoMad || 0);
+      if (v > peak) peak = v;
+      const dd = peak > 0 ? v - peak : 0;
+      const x = pL + ((new Date(d.snapshotDate).getTime() - yearStart) / yearSpan) * cW;
+      return { x, dd, date: d.snapshotDate };
+    });
+  }, [history, cW]);
+
+  if (data.length < 2) return null;
+  const minDD = Math.min(...data.map(d => d.dd), 0);
+  if (minDD === 0) return null;
+  const toY = v => pT + (v / minDD) * cH;
+  const aPath = data.map((d, i) => `${i === 0 ? "M" : "L"}${d.x.toFixed(1)},${toY(d.dd).toFixed(1)}`).join(" ");
+  const aArea = aPath + ` L${data[data.length-1].x.toFixed(1)},${pT} L${pL},${pT} Z`;
+
+  return (
+    <div>
+      <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.56rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--loss)", marginBottom: 6, opacity: 0.8 }}>
+        Drawdown (P&L vs Peak)
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, display: "block" }}>
+        <defs>
+          <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#EF4444" stopOpacity="0.30" />
+            <stop offset="100%" stopColor="#EF4444" stopOpacity="0.04" />
+          </linearGradient>
+        </defs>
+        <line x1={pL} x2={W - pR} y1={pT} y2={pT} stroke="var(--chart-axis)" strokeWidth={0.8} />
+        <text x={pL - 5} y={pT + 3.5} textAnchor="end" fill="var(--tx3)" fontSize={7.5} fontFamily="JetBrains Mono,monospace">0</text>
+        <text x={pL - 5} y={H - pB + 3.5} textAnchor="end" fill="var(--loss)" fontSize={7.5} fontFamily="JetBrains Mono,monospace">
+          {(minDD / 1e6).toFixed(1)}M
+        </text>
+        <path d={aArea} fill="url(#ddGrad)" />
+        <path d={aPath} fill="none" stroke="#EF4444" strokeWidth={1.4} strokeLinejoin="round" />
+        <line x1={pL} x2={pL} y1={pT} y2={H - pB} stroke="var(--chart-axis)" strokeWidth={1} />
+      </svg>
+    </div>
+  );
+};
+
 const PRINT_STYLES = `
+  .awb-tabs-nav-only .ant-tabs-content-holder,
+  .awb-tabs-nav-only .ant-tabs-tabpane { display: none !important; height: 0 !important; padding: 0 !important; }
+  .awb-tabs-nav-only .ant-tabs-nav { margin-bottom: 0 !important; }
+  .awb-tabs-nav-only .ant-tabs-tab { font-family: var(--f-disp) !important; font-weight: 700 !important; font-size: 0.60rem !important; letter-spacing: 0.07em !important; text-transform: uppercase !important; }
   @media print {
     @page { size: A4; margin: 14mm 12mm 12mm; }
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -99,69 +362,30 @@ const yearProgress = () => {
 };
 
 const KpiCard = ({ label, value, sub, color, Icon, alert }) => (
-  <div
-    className="card"
-    style={{ padding: "11px 13px", position: "relative", overflow: "hidden" }}
+  <Card
+    size="small"
+    style={{ position: "relative", overflow: "hidden", borderTop: `2px solid ${color}` }}
+    styles={{ body: { padding: "10px 13px" } }}
   >
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: 7,
-      }}
-    >
-      <span
-        className="lbl"
-        style={{ fontSize: "0.53rem", letterSpacing: "0.12em" }}
-      >
-        {label}
-      </span>
-      <div
-        style={{
-          width: 20,
-          height: 20,
-          borderRadius: 3,
-          background: `${color}18`,
-          border: `1px solid ${color}28`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {alert ? (
-          <AlertTriangle size={10} style={{ color }} />
-        ) : (
-          <Icon size={10} style={{ color }} />
-        )}
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+      <Tooltip title={sub} placement="top">
+        <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.53rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--tx3)", cursor: "default", borderBottom: sub ? "1px dashed var(--b2)" : "none" }}>
+          {label}
+        </span>
+      </Tooltip>
+      <div style={{ width: 20, height: 20, borderRadius: 3, background: `${color}18`, border: `1px solid ${color}28`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        {alert ? <AlertTriangle size={10} style={{ color }} /> : <Icon size={10} style={{ color }} />}
       </div>
     </div>
-    <div
-      style={{
-        fontFamily: "var(--f-mono)",
-        fontWeight: 700,
-        fontSize: "1.05rem",
-        color,
-        lineHeight: 1,
-        letterSpacing: "-0.02em",
-      }}
-    >
+    <div style={{ fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: "1.05rem", color, lineHeight: 1, letterSpacing: "-0.02em" }}>
       {value}
     </div>
     {sub && (
-      <div
-        style={{
-          fontFamily: "var(--f-body)",
-          fontSize: "0.58rem",
-          color: "var(--tx3)",
-          marginTop: 5,
-          lineHeight: 1.3,
-        }}
-      >
+      <div style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)", marginTop: 5, lineHeight: 1.3 }}>
         {sub}
       </div>
     )}
-  </div>
+  </Card>
 );
 
 const MonthlyChart = ({ history }) => {
@@ -279,6 +503,19 @@ const MonthlyChart = ({ history }) => {
               rx="2"
               style={{ transition: "height 0.5s ease,y 0.5s ease" }}
             />
+            {bH > 14 && (
+              <text
+                x={cx}
+                y={pos ? by - 3 : by + bH + 10}
+                textAnchor="middle"
+                fill={pos ? "var(--profit)" : "var(--loss)"}
+                fontSize="7.5"
+                fontFamily="IBM Plex Mono,monospace"
+                fontWeight="700"
+              >
+                {pos ? "+" : ""}{m.value >= 1e6 ? `${(m.value/1e6).toFixed(1)}M` : m.value <= -1e6 ? `${(m.value/1e6).toFixed(1)}M` : `${(m.value/1e3).toFixed(0)}k`}
+              </text>
+            )}
             <text
               x={cx}
               y={H - pB + 12}
@@ -307,180 +544,69 @@ const MonthlyChart = ({ history }) => {
 const AttributionBar = ({ label, value, total, color }) => {
   const pct = total > 0 ? Math.min((Math.abs(value) / total) * 100, 100) : 0;
   const pos = value >= 0;
+  const col = pos ? color : "var(--loss)";
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 4,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--f-body)",
-            fontSize: "0.65rem",
-            color: "var(--tx2)",
-          }}
-        >
-          {label}
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: "0.67rem",
-            fontWeight: 600,
-            color: pos ? color : "var(--loss)",
-          }}
-        >
-          {fMAD(value)}
-        </span>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+        <span style={{ fontFamily: "var(--f-body)", fontSize: "0.65rem", color: "var(--tx2)" }}>{label}</span>
+        <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.68rem", fontWeight: 700, color: col }}>{fMAD(value)}</span>
       </div>
-      <div
-        style={{
-          height: 5,
-          borderRadius: 3,
-          background: "var(--elev)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${pct}%`,
-            borderRadius: 3,
-            background: pos ? color : "var(--loss)",
-            transition: "width 0.8s ease",
-            opacity: 0.85,
-          }}
-        />
-      </div>
+      <Progress
+        percent={parseFloat(pct.toFixed(1))}
+        strokeColor={col}
+        trailColor="var(--elev)"
+        showInfo={false}
+        size={["100%", 5]}
+        style={{ margin: 0 }}
+      />
     </div>
   );
 };
 
 const LimitGauge = ({ label, limit, used, currency, color }) => {
   const pct = limit > 0 ? (used / limit) * 100 : 0;
-  const over = pct > 90,
-    warn = pct > 75;
-  const gCol = over ? "var(--loss)" : warn ? "var(--warn)" : color;
+  const over = pct > 90, warn = pct > 75;
+  const gCol = over ? "#ff4d4f" : warn ? "#faad14" : color;
   return (
-    <div
-      style={{
-        padding: "10px 14px",
-        borderRadius: 8,
-        background: "var(--surf)",
-        border: `1px solid ${over ? "rgba(255,43,96,0.25)" : "var(--b1)"}`,
-      }}
+    <Card
+      size="small"
+      style={{ border: over ? "1px solid rgba(255,77,79,0.35)" : undefined }}
+      styles={{ body: { padding: "12px 14px" } }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          marginBottom: 8,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--f-body)",
-            fontSize: "0.65rem",
-            color: "var(--tx2)",
-            lineHeight: 1.3,
-          }}
-        >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.64rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--tx1)", lineHeight: 1.3 }}>
           {label}
         </span>
-        {over && (
-          <span
-            style={{
-              fontFamily: "var(--f-disp)",
-              fontSize: "0.52rem",
-              fontWeight: 800,
-              color: "var(--loss)",
-              letterSpacing: "0.09em",
-              padding: "2px 6px",
-              background: "rgba(255,43,96,0.10)",
-              borderRadius: 3,
-            }}
-          >
-            LIMITE
-          </span>
-        )}
+        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+          {over  && <Tag color="error"   style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.50rem", letterSpacing: "0.09em" }}>LIMITE</Tag>}
+          {!over && warn && <Tag color="warning" style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.50rem", letterSpacing: "0.09em" }}>ATTENTION</Tag>}
+          {!over && !warn && <Tag color="success" style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.50rem", letterSpacing: "0.09em" }}>OK</Tag>}
+        </div>
       </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          marginBottom: 6,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: "0.82rem",
-            fontWeight: 700,
-            color: gCol,
-          }}
-        >
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+        <span style={{ fontFamily: "var(--f-mono)", fontSize: "1.10rem", fontWeight: 700, color: gCol, letterSpacing: "-0.02em" }}>
           {(used / 1e6).toFixed(1)} M
         </span>
-        <span
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: "0.62rem",
-            color: "var(--tx3)",
-          }}
-        >
+        <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.62rem", color: "var(--tx3)" }}>
           / {(limit / 1e6).toFixed(0)} M {currency}
         </span>
       </div>
-      <div
-        style={{
-          height: 5,
-          borderRadius: 3,
-          background: "var(--elev)",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${Math.min(pct, 100)}%`,
-            borderRadius: 3,
-            background: gCol,
-            transition: "width 0.8s ease",
-          }}
-        />
+
+      <Progress
+        percent={parseFloat(Math.min(pct, 100).toFixed(1))}
+        strokeColor={gCol}
+        trailColor="var(--elev)"
+        showInfo={false}
+        size={["100%", 6]}
+        style={{ margin: "8px 0 6px" }}
+      />
+
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.60rem", color: gCol, fontWeight: 600 }}>{pct.toFixed(1)}% utilisé</span>
+        <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.60rem", color: "var(--tx3)" }}>{((limit - used) / 1e6).toFixed(1)} M disponible</span>
       </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginTop: 4,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: "0.58rem",
-            color: gCol,
-          }}
-        >
-          {pct.toFixed(1)}% utilisé
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: "0.58rem",
-            color: "var(--tx3)",
-          }}
-        >
-          {((limit - used) / 1e6).toFixed(1)} M disponible
-        </span>
-      </div>
-    </div>
+    </Card>
   );
 };
 
@@ -539,108 +665,51 @@ const MKT_RATES = [
 const MarketContextPanel = ({ rates }) => {
   const isLive = !!rates;
   return (
-    <div className="card" style={{ padding: "14px 18px", marginBottom: 16 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
+    <Card
+      size="small"
+      style={{ marginBottom: 16 }}
+      styles={{ body: { padding: "12px 16px" } }}
+      title={
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              fontFamily: "var(--f-disp)",
-              fontWeight: 700,
-              fontSize: "0.63rem",
-              letterSpacing: "0.10em",
-              textTransform: "uppercase",
-              color: "var(--tx1)",
-            }}
-          >
+          <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.63rem", letterSpacing: "0.10em", textTransform: "uppercase" }}>
             Contexte de Marché
           </span>
-          <span
-            style={{
-              fontFamily: "var(--f-disp)",
-              fontSize: "0.50rem",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              padding: "1px 5px",
-              borderRadius: 3,
-              background: isLive
-                ? "rgba(0,232,153,0.08)"
-                : "rgba(100,116,139,0.10)",
-              border: `1px solid ${isLive ? "rgba(0,232,153,0.20)" : "rgba(100,116,139,0.20)"}`,
-              color: isLive ? "var(--profit)" : "var(--tx3)",
-            }}
+          <Tag
+            color={isLive ? "success" : "default"}
+            style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.50rem", letterSpacing: "0.09em" }}
           >
             {isLive ? "LIVE" : "REF."}
-          </span>
+          </Tag>
         </div>
-        <span
-          style={{
-            fontFamily: "var(--f-body)",
-            fontSize: "0.58rem",
-            color: "var(--tx3)",
-          }}
-        >
-          Source : Bloomberg / Attijariwafa Markets
+      }
+      extra={
+        <span style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)" }}>
+          Bloomberg / Attijariwafa Markets
         </span>
-      </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(6, 1fr)",
-          gap: 10,
-        }}
-      >
+      }
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10 }}>
         {MKT_RATES.map((item) => {
           const raw = rates?.[item.key];
           const val = raw != null ? parseFloat(raw) : item.fallback;
           return (
-            <div
+            <Card
               key={item.label}
-              style={{
-                padding: "8px 10px",
-                borderRadius: 7,
-                background: "var(--surf)",
-                border: "1px solid var(--b1)",
-                textAlign: "center",
-              }}
+              size="small"
+              style={{ textAlign: "center" }}
+              styles={{ body: { padding: "8px 10px" } }}
             >
-              <div
-                style={{
-                  fontFamily: "var(--f-disp)",
-                  fontWeight: 700,
-                  fontSize: "0.51rem",
-                  letterSpacing: "0.09em",
-                  textTransform: "uppercase",
-                  color: "var(--tx3)",
-                  marginBottom: 5,
-                }}
-              >
+              <div style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.51rem", letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--tx3)", marginBottom: 5 }}>
                 {item.label}
               </div>
-              <div
-                style={{
-                  fontFamily: "var(--f-mono)",
-                  fontSize: "0.88rem",
-                  fontWeight: 700,
-                  color: item.col,
-                  lineHeight: 1,
-                  letterSpacing: "-0.02em",
-                }}
-              >
+              <div style={{ fontFamily: "var(--f-mono)", fontSize: "0.90rem", fontWeight: 700, color: item.col, lineHeight: 1, letterSpacing: "-0.02em" }}>
                 {item.fmt(val)}
               </div>
-            </div>
+            </Card>
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 };
 
@@ -657,7 +726,7 @@ const ReportingView = () => {
   } = useTrading();
   const { user } = useAuth();
   const { annualTargets, exposureLimits } = useAdmin();
-  const [activeTab, setActiveTab] = useState("objectifs");
+  const [activeTab, setActiveTab] = useState("morning");
 
   // Dynamic TARGETS from backend (fallback to hardcoded if not loaded yet)
   const TARGETS = useMemo(() => {
@@ -687,48 +756,6 @@ const ReportingView = () => {
     [TARGETS],
   );
 
-  // Dynamic LIMITS from backend (fallback to hardcoded if not loaded yet)
-  const LIMITS = useMemo(() => {
-    if (exposureLimits && exposureLimits.length > 0) {
-      return exposureLimits.map((l) => ({
-        label: l.portfolioName,
-        limit: parseFloat(l.limitMeur) * 1e6,
-        currency: l.currency || "EUR",
-        used: 0,
-        color: l.colorToken || "var(--cyan)",
-      }));
-    }
-    return [
-      {
-        label: "Eurobonds (EUR)",
-        limit: 280e6,
-        currency: "EUR",
-        used: 109.46e6,
-        color: "var(--eb)",
-      },
-      {
-        label: "CLN Maroc (USD)",
-        limit: 50e6,
-        currency: "USD",
-        used: 3e6,
-        color: "var(--cln)",
-      },
-      {
-        label: "CLN GCC (USD)",
-        limit: 30e6,
-        currency: "USD",
-        used: 0,
-        color: "#7C3AED",
-      },
-      {
-        label: "EGP Bills (USD)",
-        limit: 20e6,
-        currency: "USD",
-        used: 3.8e6,
-        color: "var(--egp)",
-      },
-    ];
-  }, [exposureLimits]);
   const [scenShocks, setScenShocks] = useState({
     pess: 100,
     central: 0,
@@ -744,41 +771,46 @@ const ReportingView = () => {
   }, []);
 
   const pnl = useMemo(() => {
-    const n = (f) => parseFloat(f ?? 0);
+    const n = f => parseFloat(f ?? 0);
+    // ISINs already covered by external snapshots → exclude from dashboardRows to avoid double-count
+    const extIsins = new Set([
+      ...(clnList || []).map(r => r.isin),
+      ...(egpList || []).map(r => r.isin),
+    ].filter(Boolean));
+
     const moroc = dashboardRows
-      .filter((r) => (r.subAsset || "").toLowerCase().includes("mor bond"))
+      .filter(r => (r.subAsset || "").toLowerCase().includes("mor bond"))
       .reduce((s, r) => s + n(r.pnlEconomicMad), 0);
     const ocp = dashboardRows
-      .filter((r) => (r.subAsset || "").toLowerCase().includes("ocp bond"))
+      .filter(r => (r.subAsset || "").toLowerCase().includes("ocp bond"))
       .reduce((s, r) => s + n(r.pnlEconomicMad), 0);
-    const cln = clnList.reduce((s, r) => s + n(r.plEcoMad), 0);
-    const egp = egpList.reduce((s, r) => s + n(r.plEcoMad), 0);
-    return { moroc, ocp, cln, egp, total: moroc + ocp + cln + egp };
+    const cln = (clnList || []).reduce((s, r) => s + n(r.plEcoMad), 0);
+    const egp = (egpList || []).reduce((s, r) => s + n(r.plEcoMad), 0);
+    // Bonds in dashboardRows not captured above and not already in external snapshots (e.g. CLN GCC)
+    const other = dashboardRows
+      .filter(r => {
+        const sub = (r.subAsset || "").toLowerCase();
+        return !sub.includes("mor bond") && !sub.includes("ocp bond")
+            && !sub.includes("future") && !extIsins.has(r.isin);
+      })
+      .reduce((s, r) => s + n(r.pnlEconomicMad), 0);
+    return { moroc, ocp, cln, egp, other, total: moroc + ocp + cln + egp + other };
   }, [dashboardRows, clnList, egpList]);
 
   const attribution = useMemo(() => {
-    const n = (f) => parseFloat(f ?? 0);
+    const n = f => parseFloat(f ?? 0);
     const usdMad = parseFloat(rates?.usdMad || 9.251);
-    const carry = dashboardRows.reduce(
-      (s, r) => s + n(r.cpnThetaMad) * tradingDays,
-      0,
-    );
-    const latent = dashboardRows.reduce(
-      (s, r) => s + n(r.pnlLatentCcy) * usdMad,
-      0,
-    );
-    const realized = dashboardRows.reduce(
-      (s, r) => s + n(r.pnlRealizedCcy) * usdMad,
-      0,
-    );
-    const funding = dashboardRows.reduce((s, r) => s + n(r.fundingCostMad), 0);
-    const total = Math.max(
-      Math.abs(carry) +
-        Math.abs(latent) +
-        Math.abs(realized) +
-        Math.abs(funding),
-      1,
-    );
+    const eurMad = parseFloat(rates?.eurMad || 10.418);
+    const fx = r => (r.currency || "USD").toUpperCase() === "EUR" ? eurMad : usdMad;
+
+    // Carry = daily theta × trading days elapsed (YTD estimation)
+    const carry    = dashboardRows.reduce((s, r) => s + n(r.cpnThetaMad) * tradingDays, 0);
+    // Latent / Realized: pnlLatentCcy / pnlRealizedCcy are in the bond's native CCY → convert with correct FX
+    const latent   = dashboardRows.reduce((s, r) => s + n(r.pnlLatentCcy)   * fx(r), 0);
+    const realized = dashboardRows.reduce((s, r) => s + n(r.pnlRealizedCcy) * fx(r), 0);
+    // fundingCostMad is already in MAD (PnlService converts it)
+    const funding  = dashboardRows.reduce((s, r) => s + n(r.fundingCostMad), 0);
+    const total = Math.max(Math.abs(carry) + Math.abs(latent) + Math.abs(realized) + Math.abs(funding), 1);
     return { carry, latent, realized, funding, total };
   }, [dashboardRows, tradingDays, rates]);
 
@@ -815,102 +847,54 @@ const ReportingView = () => {
   }, [pnlDailyHistory]);
 
   const scenarioData = useMemo(() => {
-    const n = (f) => parseFloat(f ?? 0);
+    const n = f => parseFloat(f ?? 0);
     const remainDays = Math.max(0, 252 - tradingDays);
     const usdMad = parseFloat(rates?.usdMad || 9.251);
+    const eurMad = parseFloat(rates?.eurMad || 10.418);
+    // DV01 is in the bond's native currency → convert each bond separately
+    const dv01ToMad = r => n(r.dv01Bond) * ((r.currency || "USD").toUpperCase() === "EUR" ? eurMad : usdMad);
 
     const SCENS = [
-      {
-        key: "pess",
-        label: "Pessimiste",
-        tag: "HAUSSE TAUX",
-        shockBps: scenShocks.pess,
-        color: "var(--loss)",
-        bg: "rgba(255,43,96,0.06)",
-      },
-      {
-        key: "central",
-        label: "Central",
-        tag: "MARCHÉ STABLE",
-        shockBps: scenShocks.central,
-        color: "var(--cyan)",
-        bg: "rgba(0,202,255,0.05)",
-      },
-      {
-        key: "opt",
-        label: "Optimiste",
-        tag: "BAISSE TAUX",
-        shockBps: scenShocks.opt,
-        color: "var(--profit)",
-        bg: "rgba(0,232,153,0.05)",
-      },
+      { key: "pess",    label: "Pessimiste", tag: "HAUSSE TAUX",    shockBps: scenShocks.pess,    color: "var(--loss)",   bg: "rgba(255,43,96,0.06)" },
+      { key: "central", label: "Central",    tag: "MARCHÉ STABLE",  shockBps: scenShocks.central, color: "var(--cyan)",   bg: "rgba(0,202,255,0.05)" },
+      { key: "opt",     label: "Optimiste",  tag: "BAISSE TAUX",    shockBps: scenShocks.opt,     color: "var(--profit)", bg: "rgba(0,232,153,0.05)" },
     ];
 
-    const bondsMoroc = dashboardRows.filter((r) =>
-      (r.subAsset || "").toLowerCase().includes("mor bond"),
-    );
-    const bondsOcp = dashboardRows.filter((r) =>
-      (r.subAsset || "").toLowerCase().includes("ocp bond"),
-    );
+    const bondsMoroc = dashboardRows.filter(r => (r.subAsset || "").toLowerCase().includes("mor bond"));
+    const bondsOcp   = dashboardRows.filter(r => (r.subAsset || "").toLowerCase().includes("ocp bond"));
 
+    // DV01 already converted to MAD per bond → sum directly usable in MAD impact calculation
+    const dv01MorocMad = bondsMoroc.reduce((s, r) => s + dv01ToMad(r), 0);
+    const dv01OcpMad   = bondsOcp.reduce((s, r) => s + dv01ToMad(r), 0);
+    // Keep raw USD/EUR DV01 sum for display in the risk metrics panel (e.g. "X $/bp")
     const dv01Moroc = bondsMoroc.reduce((s, r) => s + n(r.dv01Bond), 0);
-    const dv01Ocp = bondsOcp.reduce((s, r) => s + n(r.dv01Bond), 0);
+    const dv01Ocp   = bondsOcp.reduce((s, r) => s + n(r.dv01Bond), 0);
 
-    const carryMoroc =
-      bondsMoroc.reduce((s, r) => s + n(r.netDailyMad), 0) * remainDays;
-    const carryOcp =
-      bondsOcp.reduce((s, r) => s + n(r.netDailyMad), 0) * remainDays;
-    const carryCln = tradingDays > 0 ? (pnl.cln / tradingDays) * remainDays : 0;
-    const carryEgp = tradingDays > 0 ? (pnl.egp / tradingDays) * remainDays : 0;
+    const carryMoroc = bondsMoroc.reduce((s, r) => s + n(r.netDailyMad), 0) * remainDays;
+    const carryOcp   = bondsOcp.reduce((s, r) => s + n(r.netDailyMad), 0) * remainDays;
+    const carryCln   = tradingDays > 0 ? (pnl.cln / tradingDays) * remainDays : 0;
+    const carryEgp   = tradingDays > 0 ? (pnl.egp / tradingDays) * remainDays : 0;
 
     const ASSET_ROWS = [
-      {
-        key: "moroc",
-        label: "Eurobond Maroc",
-        actual: pnl.moroc,
-        carry: carryMoroc,
-        dv01: dv01Moroc,
-        color: "var(--eb)",
-      },
-      {
-        key: "ocp",
-        label: "Eurobond OCP",
-        actual: pnl.ocp,
-        carry: carryOcp,
-        dv01: dv01Ocp,
-        color: "#9B3EEF",
-      },
-      {
-        key: "cln",
-        label: "CLN",
-        actual: pnl.cln,
-        carry: carryCln,
-        dv01: 0,
-        color: "var(--cln)",
-      },
-      {
-        key: "egp",
-        label: "EGP Bills",
-        actual: pnl.egp,
-        carry: carryEgp,
-        dv01: 0,
-        color: "var(--egp)",
-      },
+      { key: "moroc", label: "Eurobond Maroc", actual: pnl.moroc, carry: carryMoroc, dv01Mad: dv01MorocMad, dv01: dv01Moroc, color: "var(--eb)" },
+      { key: "ocp",   label: "Eurobond OCP",   actual: pnl.ocp,   carry: carryOcp,   dv01Mad: dv01OcpMad,   dv01: dv01Ocp,   color: "#9B3EEF" },
+      { key: "cln",   label: "CLN",             actual: pnl.cln,   carry: carryCln,   dv01Mad: 0,            dv01: 0,         color: "var(--cln)" },
+      { key: "egp",   label: "EGP Bills",       actual: pnl.egp,   carry: carryEgp,   dv01Mad: 0,            dv01: 0,         color: "var(--egp)" },
     ];
 
     return {
-      scenarios: SCENS.map((s) => {
-        const assetResults = ASSET_ROWS.map((r) => {
-          const rateImpact = r.dv01 > 0 ? -r.dv01 * s.shockBps * usdMad : 0;
-          const yeProjection = r.actual + r.carry + rateImpact;
-          return { ...r, rateImpact, yeProjection };
+      scenarios: SCENS.map(s => {
+        const assetResults = ASSET_ROWS.map(r => {
+          // rateImpact already in MAD: dv01Mad (MAD/bp) × shockBps → MAD
+          const rateImpact = r.dv01Mad > 0 ? -r.dv01Mad * s.shockBps : 0;
+          return { ...r, rateImpact, yeProjection: r.actual + r.carry + rateImpact };
         });
-        const total = assetResults.reduce((sum, r) => sum + r.yeProjection, 0);
-        return { ...s, assetResults, total };
+        return { ...s, assetResults, total: assetResults.reduce((sum, r) => sum + r.yeProjection, 0) };
       }),
       ASSET_ROWS,
       remainDays,
-      dv01Total: dv01Moroc + dv01Ocp,
+      dv01TotalMad: dv01MorocMad + dv01OcpMad,
+      dv01Total:    dv01Moroc + dv01Ocp,
     };
   }, [dashboardRows, clnList, egpList, pnl, tradingDays, rates, scenShocks]);
 
@@ -977,11 +961,12 @@ const ReportingView = () => {
   });
 
   const TABS = [
-    { id: "objectifs", label: "Objectifs & Projections", icon: Target },
-    { id: "attribution", label: "Attribution P&L", icon: BarChart2 },
-    { id: "scenarios", label: "Analyse Scénarios", icon: Sliders },
-    { id: "historique", label: "Historique Mensuel", icon: Activity },
-    { id: "limites", label: "Suivi des Limites", icon: Shield },
+    { id: "morning",    label: "Morning Report",        icon: Sun },
+    { id: "objectifs",  label: "Objectifs & Projections", icon: Target },
+    { id: "attribution",label: "Attribution P&L",       icon: BarChart2 },
+    { id: "scenarios",  label: "Analyse Scénarios",     icon: Sliders },
+    { id: "historique", label: "Historique",             icon: Activity },
+    { id: "limites",    label: "Suivi des Limites",     icon: Shield },
   ];
 
   const printDate = new Date().toLocaleDateString("fr-FR", {
@@ -994,417 +979,411 @@ const ReportingView = () => {
     ? `${user.firstName} ${user.lastName || ""}`.trim()
     : user?.username || "Trader";
 
-  /* ── Export CSV complet (UTF-8 BOM + sep=; pour Excel FR) ── */
-  const handleExportCsv = useCallback(() => {
-    const SEP = ";";
-    const BOM = "﻿";
+  /* ── Morning Report Excel (.xlsx) — 7 onglets ── */
+  const handleExportExcel = useCallback(() => {
     const now = new Date();
-    const dateStr = now.toLocaleDateString("fr-FR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-    const timeStr = now.toLocaleTimeString("fr-FR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const dateLong = now.toLocaleDateString("fr-FR", {
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
+    const usdMad = parseFloat(rates?.usdMad || 9.251);
+    const dateStr = now.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const timeStr = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    const dateLong = now.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 
-    /* helpers */
-    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const n = (v, d = 2) => {
-      const x = parseFloat(v);
-      return isNaN(x) ? "" : x.toFixed(d);
-    };
-    const ni = (v) => {
-      const x = Math.round(parseFloat(v ?? 0));
-      return isNaN(x) ? "" : String(x);
-    };
-    const R = (...cells) => cells.join(SEP);
-
-    const lines = [];
-    const blank = () => lines.push("");
-    const sect = (t) => {
-      blank();
-      lines.push(q(`${t}`));
-      blank();
-    };
-
-    /* ── EN-TÊTE RAPPORT ── */
-    lines.push(`sep=${SEP}`);
-    lines.push(
-      R(
-        q("ATTIJARIWAFA BANK — DESK INTERNATIONAL FIXED INCOME"),
-        q(`RAPPORT ANNUEL ${year}`),
-        q("CONFIDENTIEL"),
-      ),
-    );
-    lines.push(
-      R(
-        q("Trader"),
-        q(traderName),
-        q("Exporté le"),
-        q(`${dateStr}  ${timeStr}`),
-        q("Plateforme"),
-        q("AWB Trading Desk"),
-      ),
-    );
-    lines.push(R(q(dateLong)));
-    blank();
-
-    /* ── [1/6] OBJECTIFS & PROJECTIONS ── */
-    sect(`[1/6]  OBJECTIFS & PROJECTIONS ${year}`);
-    lines.push(
-      R(
-        q("Catégorie"),
-        q(`Objectif ${year} (MAD)`),
-        q("Réalisé YTD (MAD)"),
-        q("% Réalisation"),
-        q("Projection Pessimiste (MAD)"),
-        q("Projection Centrale (MAD)"),
-        q("Projection Optimiste (MAD)"),
-        q("Statut"),
-        q("% Avancement Annuel"),
-      ),
-    );
-    [...rows, totRow].forEach((r) => {
-      lines.push(
-        R(
-          q(r.label),
-          ni(r.target),
-          ni(r.actual),
-          n(r.realPct, 2),
-          ni(r.projPess),
-          ni(r.projCentral),
-          ni(r.projOpt),
-          q(r.status?.lbl ?? ""),
-          n(yearProg * 100, 1),
-        ),
-      );
-    });
-    blank();
-
-    /* ── [2/6] CONTEXTE DE MARCHÉ ── */
-    sect("[2/6]  CONTEXTE DE MARCHÉ");
-    lines.push(R(q("Indicateur"), q("Valeur"), q("Source"), q("Date Export")));
-    MKT_RATES.forEach((item) => {
-      const raw = rates?.[item.key];
-      const val = raw != null ? parseFloat(raw) : item.fallback;
-      lines.push(
-        R(
-          q(item.label),
-          n(val, 4),
-          q(rates ? "Bloomberg LIVE" : "Référence interne"),
-          q(dateStr),
-        ),
-      );
-    });
-    blank();
-
-    /* ── [3/6] ATTRIBUTION P&L ── */
-    sect("[3/6]  ATTRIBUTION P&L");
-    const attrTotal = Math.max(
-      Math.abs(attribution.carry) +
-        Math.abs(attribution.latent) +
-        Math.abs(attribution.realized) +
-        Math.abs(attribution.funding),
-      1,
-    );
-    lines.push(
-      R(q("Composante"), q("Montant (MAD)"), q("Poids %"), q("Description")),
-    );
-    [
-      [
-        "Coupon / Carry (YTD estimé)",
-        attribution.carry,
-        "Revenus obligataires courus estimés YTD",
-      ],
-      [
-        "P&L Latent (Mark-to-Market)",
-        attribution.latent,
-        "Variation de valeur de marché non réalisée",
-      ],
-      [
-        "P&L Réalisé (trades fermés)",
-        attribution.realized,
-        "Plus/moins-values matérialisées",
-      ],
-      [
-        "Coût de Financement",
-        attribution.funding,
-        "Repo, collatéral et coûts de portage",
-      ],
-    ].forEach(([label, val, desc]) => {
-      lines.push(
-        R(q(label), ni(val), n((Math.abs(val) / attrTotal) * 100, 1), q(desc)),
-      );
-    });
-    lines.push(
-      R(
-        q("NET ÉCONOMIQUE TOTAL"),
-        ni(pnl.total),
-        n(100, 1),
-        q("Somme algébrique"),
-      ),
-    );
-    blank();
-
-    /* ── [4/6] STATISTIQUES JOURNALIÈRES ── */
-    if (stats) {
-      sect("[4/6]  STATISTIQUES JOURNALIÈRES");
-      lines.push(R(q("Métrique"), q("Valeur"), q("Unité / Note")));
-      [
-        ["P&L moyen / jour", String(Math.round(stats.mean)), "MAD"],
-        ["Volatilité journalière (σ)", String(Math.round(stats.std)), "MAD"],
-        [
-          "Ratio de Sharpe (ann.)",
-          stats.sharpe != null ? stats.sharpe.toFixed(4) : "—",
-          "Annualisé × √252",
-        ],
-        [
-          "Meilleure journée",
-          String(Math.round(stats.max)),
-          `MAD  —  ${fDate(stats.maxDay?.snapshotDate)}`,
-        ],
-        [
-          "Pire journée",
-          String(Math.round(stats.min)),
-          `MAD  —  ${fDate(stats.minDay?.snapshotDate)}`,
-        ],
-        [
-          "Jours positifs",
-          String(stats.pos),
-          `sur ${stats.total} jours  (${((stats.pos / stats.total) * 100).toFixed(1)}%)`,
-        ],
-        ["Jours analysés", String(stats.total), "jours ouvrés"],
-      ].forEach(([label, val, note]) => {
-        lines.push(R(q(label), q(val), q(note)));
-      });
-      blank();
-    }
-
-    /* ── [5/6] HISTORIQUE MENSUEL + JOURNALIER ── */
-    if (pnlDailyHistory && pnlDailyHistory.length > 0) {
-      sect(`[5/6]  HISTORIQUE MENSUEL ${year}`);
-      const mMap = {};
-      pnlDailyHistory.forEach((d) => {
-        if (!d.snapshotDate) return;
-        const m = d.snapshotDate.substring(0, 7);
-        if (!mMap[m])
-          mMap[m] = {
-            pnl: 0,
-            fin: 0,
-            days: 0,
-            pos: 0,
-            best: -Infinity,
-            worst: Infinity,
-          };
-        const v = parseFloat(d.pnlJourMad || 0);
-        mMap[m].pnl += v;
-        mMap[m].fin += parseFloat(d.finTotalMad || 0);
-        mMap[m].days++;
-        if (v > 0) mMap[m].pos++;
-        if (v > mMap[m].best) mMap[m].best = v;
-        if (v < mMap[m].worst) mMap[m].worst = v;
-      });
-      lines.push(
-        R(
-          q("Mois"),
-          q("P&L Mensuel (MAD)"),
-          q("Financement (MAD)"),
-          q("Meilleure Journée (MAD)"),
-          q("Pire Journée (MAD)"),
-          q("Jours Positifs"),
-          q("Nb Jours"),
-        ),
-      );
-      Object.entries(mMap)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .forEach(([m, d]) => {
-          const [yr, mo] = m.split("-");
-          lines.push(
-            R(
-              q(`${MONTHS_FR[parseInt(mo) - 1]} ${yr}`),
-              ni(d.pnl),
-              ni(d.fin),
-              ni(d.best === -Infinity ? 0 : d.best),
-              ni(d.worst === Infinity ? 0 : d.worst),
-              String(d.pos),
-              String(d.days),
-            ),
-          );
+    const applyColWidths = (ws, widths) => { ws["!cols"] = widths.map((w) => ({ wch: w })); };
+    const applyNumFmt = (ws, rowStart, colIdxs, fmt) => {
+      const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+      for (let R = rowStart; R <= range.e.r; R++) {
+        colIdxs.forEach((C) => {
+          const ref = XLSX.utils.encode_cell({ r: R, c: C });
+          if (ws[ref] && typeof ws[ref].v === "number") ws[ref].z = fmt;
         });
-      blank();
-
-      /* détail journalier */
-      sect(`[5b]  HISTORIQUE JOURNALIER (${pnlDailyHistory.length} entrées)`);
-      lines.push(
-        R(
-          q("Date"),
-          q("P&L Jour (MAD)"),
-          q("P&L Éco. Cumulé (MAD)"),
-          q("Financement (MAD)"),
-        ),
-      );
-      pnlDailyHistory.forEach((d) => {
-        lines.push(
-          R(
-            q(d.snapshotDate ?? ""),
-            ni(d.pnlJourMad),
-            ni(d.pnlEcoMad),
-            ni(d.finTotalMad),
-          ),
-        );
-      });
-      blank();
-    }
-
-    /* ── [6/6] DÉTAIL DES POSITIONS ── */
-    if (dashboardRows && dashboardRows.length > 0) {
-      sect(`[6/6]  DÉTAIL DES POSITIONS LIVE (${dashboardRows.length} lignes)`);
-      lines.push(
-        R(
-          q("ISIN"),
-          q("Description"),
-          q("Asset Class"),
-          q("Nominal (USD)"),
-          q("Coupon %"),
-          q("Échéance"),
-          q("WAP Dirty"),
-          q("Prix Marché"),
-          q("Perf. WAP %"),
-          q("G-Spread Bid (bp)"),
-          q("I-Spread Bid (bp)"),
-          q("Target Spread (bp)"),
-          q("Gap vs Target (bp)"),
-          q("P&L Économique (MAD)"),
-          q("Net Daily Carry (MAD)"),
-          q("P&L Latent (MAD)"),
-          q("Coût Financement (MAD)"),
-          q("Duration Modifiée (ans)"),
-          q("DV01 (USD/bp)"),
-          q("Signal"),
-          q("Alerte Carry"),
-        ),
-      );
-      dashboardRows.forEach((r) => {
-        const coupon = parseFloat(r.couponRate || 0);
-        const cpnPct = (coupon < 1 ? coupon * 100 : coupon).toFixed(4);
-        const gBid = parseFloat(r.gSpreadBid || 0);
-        const tgt = parseFloat(r.targetSpread || 0);
-        const gap = tgt > 0 ? (gBid - tgt).toFixed(1) : "";
-        lines.push(
-          R(
-            q(r.isin ?? ""),
-            q(r.description ?? ""),
-            q(r.subAsset ?? ""),
-            ni(r.netNominal),
-            cpnPct,
-            q(r.maturityDate ?? ""),
-            n(r.lastWapDirty, 6),
-            n(r.dirtyMarket, 6),
-            n(parseFloat(r.perfWap || 0) * 100, 4),
-            n(r.gSpreadBid, 2),
-            n(r.iSpreadBid, 2),
-            n(r.targetSpread, 2),
-            gap,
-            ni(r.pnlEconomicMad),
-            ni(r.netDailyMad),
-            ni(
-              parseFloat(r.pnlLatentCcy || 0) *
-                parseFloat(rates?.usdMad || 9.251),
-            ),
-            ni(r.fundingCostMad),
-            n(r.modifiedDuration, 4),
-            ni(r.dv01Bond),
-            q(r.decision ?? ""),
-            q(r.netDailyAlert ? "OUI" : "NON"),
-          ),
-        );
-      });
-      blank();
-    }
-
-    /* ── [7/7] CONTRIBUTION P&L PAR ISIN ── */
-    if (dashboardRows && dashboardRows.length > 0) {
-      const totalAbsPnl2 =
-        dashboardRows.reduce(
-          (s, r) => s + Math.abs(parseFloat(r.pnlEconomicMad || 0)),
-          0,
-        ) || 1;
-      const isinContribs = dashboardRows
-        .map((r) => ({
-          isin: r.isin,
-          desc: r.description,
-          nominal: parseFloat(r.netNominal || 0),
-          pnl: parseFloat(r.pnlEconomicMad || 0),
-        }))
-        .filter((r) => r.pnl !== 0)
-        .sort((a, b) => b.pnl - a.pnl);
-      if (isinContribs.length > 0) {
-        sect(
-          `[7/7]  CONTRIBUTION P&L PAR ISIN (${isinContribs.length} positions)`,
-        );
-        lines.push(
-          R(
-            q("ISIN"),
-            q("Description"),
-            q("Nominal (USD)"),
-            q("P&L Éco MAD"),
-            q("Contribution %"),
-            q("P&L / Nominal (bp)"),
-          ),
-        );
-        isinContribs.forEach((r) => {
-          const contribPct = (
-            (Math.abs(r.pnl) / totalAbsPnl2) *
-            100 *
-            (r.pnl >= 0 ? 1 : -1)
-          ).toFixed(2);
-          const bps =
-            r.nominal > 0 ? ((r.pnl / r.nominal) * 10000).toFixed(1) : "";
-          lines.push(
-            R(
-              q(r.isin ?? ""),
-              q(r.desc ?? ""),
-              ni(r.nominal),
-              ni(r.pnl),
-              contribPct,
-              bps,
-            ),
-          );
-        });
-        blank();
       }
-    }
+    };
 
-    /* ── PIED DE RAPPORT ── */
-    blank();
-    lines.push(
-      R(
-        q("FIN DU RAPPORT"),
-        q("Attijariwafa Bank · Desk International"),
-        q(dateLong),
-        q("CONFIDENTIEL"),
-      ),
+    const wb = XLSX.utils.book_new();
+
+    /* ── Données pré-calculées pour le résumé ── */
+    const n = (v) => parseFloat(v ?? 0);
+    const totalCarryDuJour = dashboardRows.reduce((s, r) => s + n(r.netDailyMad), 0);
+    const totalFinancementDuJour = dashboardRows.reduce((s, r) => s + n(r.dailyFundingMad || r.fundingCostMad), 0);
+    const totalNominalUsd = dashboardRows.reduce((s, r) => s + n(r.netNominal), 0);
+    const totalNominalEur = dashboardRows
+      .filter((r) => (r.currency || "").toUpperCase() === "EUR")
+      .reduce((s, r) => s + n(r.netNominal), 0);
+    const totalDv01 = dashboardRows.reduce((s, r) => s + n(r.dv01Bond), 0);
+    const negCarryCount = dashboardRows.filter((r) => r.netDailyAlert).length;
+
+    // P&L de la veille (dernière entrée de l'historique journalier)
+    const lastDaily = pnlDailyHistory && pnlDailyHistory.length > 0
+      ? pnlDailyHistory[pnlDailyHistory.length - 1] : null;
+    const pnlHier = lastDaily ? Math.round(n(lastDaily.pnlJourMad)) : null;
+    const dateHier = lastDaily?.snapshotDate ?? null;
+
+    // Toutes positions unifiées pour Top 5 / Bottom 3 (dashboardRows + CLN + EGP)
+    const allPnlRows = [
+      ...dashboardRows.map((r) => ({
+        isin: r.isin ?? "", desc: r.description ?? "",
+        pnl: n(r.pnlEconomicMad), carry: n(r.netDailyMad),
+      })),
+      ...(clnList || []).map((r) => ({
+        isin: r.isin ?? "", desc: r.description ?? r.isin ?? "CLN",
+        pnl: n(r.plEcoMad), carry: 0,
+      })),
+      ...(egpList || []).map((r) => ({
+        isin: r.isin ?? "", desc: r.description ?? r.isin ?? "EGP Bill",
+        pnl: n(r.plEcoMad), carry: 0,
+      })),
+    ].sort((a, b) => b.pnl - a.pnl);
+    const top5 = allPnlRows.slice(0, 5);
+    const bot3 = allPnlRows.slice(-3).reverse();
+
+    const attrTotal = Math.max(
+      Math.abs(attribution.carry) + Math.abs(attribution.latent) +
+      Math.abs(attribution.realized) + Math.abs(attribution.funding), 1
     );
 
-    /* ── TÉLÉCHARGEMENT ── */
-    const csv = BOM + lines.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `AWB_ITD_${year}_${now.toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    /* ── [1/7] RÉSUMÉ MORNING ── */
+    const resumeData = [
+      ["ATTIJARIWAFA BANK — DESK INTERNATIONAL FIXED INCOME", "", "MORNING REPORT", ""],
+      [dateLong, "", `Trader : ${traderName}`, `Exporté : ${dateStr} ${timeStr}`],
+      [],
+      ["INDICATEURS CLÉS DU JOUR", "", "", ""],
+      ["Indicateur", "Valeur (MAD)", "Note", ""],
+      [">>> P&L de la Veille (J-1)", pnlHier, dateHier ? `Clôture du ${fDate(dateHier)}` : "Historique non disponible", ""],
+      [">>> Carry Net Total du Jour", Math.round(totalCarryDuJour), "Coupon - Financement (toutes positions)", ""],
+      ["    dont Financement (repo/portage)", Math.round(totalFinancementDuJour), "Coût total journalier", ""],
+      ["DV01 Total Portefeuille (USD/bp)", Math.round(totalDv01), "Sensibilité 1bp hausse taux", ""],
+      ["Positions en Carry Négatif", negCarryCount, `sur ${dashboardRows.length} positions actives`, ""],
+      [],
+      ["P&L ÉCONOMIQUE PAR ASSET CLASS", "", "", ""],
+      ["Asset Class", "P&L Éco YTD (MAD)", "% du Total", "Note"],
+      ["Eurobond Maroc", Math.round(pnl.moroc), pnl.total !== 0 ? pnl.moroc / Math.abs(pnl.total) : null, ""],
+      ["Eurobond OCP", Math.round(pnl.ocp), pnl.total !== 0 ? pnl.ocp / Math.abs(pnl.total) : null, ""],
+      ["CLN", Math.round(pnl.cln), pnl.total !== 0 ? pnl.cln / Math.abs(pnl.total) : null, ""],
+      ["EGP Bills", Math.round(pnl.egp), pnl.total !== 0 ? pnl.egp / Math.abs(pnl.total) : null, ""],
+      ["TOTAL DESK", Math.round(pnl.total), 1, `${((pnl.total / TOTAL_TARGET) * 100).toFixed(1)}% de l'objectif ${year}`],
+      [],
+      ["EXPOSITION NOMINALE", "", "", ""],
+      ["Portefeuille", "Nominal (MUSD eq.)", "Note", ""],
+      ["Exposition USD", totalNominalUsd - totalNominalEur, "Nominal en USD direct", ""],
+      ["Exposition EUR (conv. USD)", totalNominalEur, "Nominal EUR (à convertir au taux EUR/USD)", ""],
+      ["TOTAL NOMINAL", totalNominalUsd, "Toutes devises en MUSD équivalent", ""],
+      [],
+      ["TOP 5 CONTRIBUTEURS (toutes asset classes)", "", "", ""],
+      ["ISIN", "Description", "P&L Éco (MAD)", "Carry Net/j (MAD)"],
+      ...top5.map((r) => [r.isin, r.desc, Math.round(r.pnl), Math.round(r.carry)]),
+      [],
+      ["BOTTOM 3 DÉTRACTEURS (toutes asset classes)", "", "", ""],
+      ["ISIN", "Description", "P&L Éco (MAD)", "Carry Net/j (MAD)"],
+      ...bot3.map((r) => [r.isin, r.desc, Math.round(r.pnl), Math.round(r.carry)]),
+      [],
+      ["KPIs ANNUELS & STATISTIQUES", "", "", ""],
+      ["Indicateur", "Valeur", "Note", ""],
+      ["P&L Économique YTD", Math.round(pnl.total), `${((pnl.total / TOTAL_TARGET) * 100).toFixed(1)}% de l'objectif`, ""],
+      ["Objectif Annuel Desk", Math.round(TOTAL_TARGET), "", ""],
+      ["Projection Centrale (ann.)", Math.round(totRow.projCentral), "Rythme actuel × 252j", ""],
+      ["P&L Moyen / Jour", stats?.mean != null ? Math.round(stats.mean) : null, "MAD / jour ouvré", ""],
+      ["Volatilité Journalière (σ)", stats?.std != null ? Math.round(stats.std) : null, "MAD", ""],
+      ["Ratio de Sharpe (ann.)", stats?.sharpe ?? null, "× √252", ""],
+      ["Jours Positifs", stats?.pos ?? null, `sur ${stats?.total ?? 0} jours (${stats ? ((stats.pos / stats.total) * 100).toFixed(1) : "—"}%)`, ""],
+      [],
+      ["ATTRIBUTION P&L", "", "", ""],
+      ["Composante", "Montant (MAD)", "Poids %", "Description"],
+      ["Coupon / Carry (YTD estimé)", Math.round(attribution.carry), Math.abs(attribution.carry) / attrTotal, "Revenus obligataires courus YTD"],
+      ["P&L Latent (Mark-to-Market)", Math.round(attribution.latent), Math.abs(attribution.latent) / attrTotal, "Variation valeur de marché non réalisée"],
+      ["P&L Réalisé (trades fermés)", Math.round(attribution.realized), Math.abs(attribution.realized) / attrTotal, "Plus/moins-values matérialisées"],
+      ["Coût de Financement", Math.round(attribution.funding), Math.abs(attribution.funding) / attrTotal, "Repo, collatéral, portage"],
+      ["NET ÉCONOMIQUE TOTAL", Math.round(pnl.total), 1, "Somme algébrique"],
+      [],
+      ["CONTEXTE DE MARCHÉ", "", "", ""],
+      ["Indicateur", "Valeur", "Source", "Date"],
+      ...MKT_RATES.map((item) => {
+        const val = rates?.[item.key] != null ? parseFloat(rates[item.key]) : item.fallback;
+        return [item.label, val, rates ? "Bloomberg LIVE" : "Référence interne", dateStr];
+      }),
+    ];
+    const wsResume = XLSX.utils.aoa_to_sheet(resumeData);
+    applyColWidths(wsResume, [38, 22, 34, 22]);
+    // Format MAD integers
+    applyNumFmt(wsResume, 4, [1], "#,##0");
+    // P&L par asset class column B (rows 11-16)
+    applyNumFmt(wsResume, 11, [1], "#,##0");
+    applyNumFmt(wsResume, 11, [2], "0.0%");
+    // Exposure nominale
+    applyNumFmt(wsResume, 18, [1], "#,##0.00");
+    // Top contributors
+    applyNumFmt(wsResume, 24, [2, 3], "#,##0");
+    applyNumFmt(wsResume, 29, [2, 3], "#,##0");
+    // KPIs annuels
+    applyNumFmt(wsResume, 32, [1], "#,##0");
+    // Attribution
+    applyNumFmt(wsResume, 41, [1], "#,##0");
+    applyNumFmt(wsResume, 41, [2], "0.0%");
+    // Fix: taux de marché sont des décimales — écraser le #,##0 appliqué globalement
+    const mktRateDataRow = resumeData.length - MKT_RATES.length;
+    applyNumFmt(wsResume, mktRateDataRow, [1], "0.0000");
+    XLSX.utils.book_append_sheet(wb, wsResume, "Résumé Morning");
+
+    /* ── [2/7] ALERTES ── */
+    const negCarryRows = dashboardRows
+      .filter((r) => r.netDailyAlert)
+      .sort((a, b) => n(a.netDailyMad) - n(b.netDailyMad));
+    const spreadAlertRows = dashboardRows
+      .filter((r) => {
+        const tgt = n(r.targetSpread);
+        const gBid = n(r.gSpreadBid);
+        return tgt > 0 && (gBid - tgt) > 30;
+      })
+      .sort((a, b) => (n(b.gSpreadBid) - n(b.targetSpread)) - (n(a.gSpreadBid) - n(a.targetSpread)));
+
+    const alertData = [
+      ["TABLEAU DE BORD DES ALERTES", "", "", "", "", ""],
+      [dateStr, "", `${negCarryRows.length} alerte(s) carry négatif · ${spreadAlertRows.length} alerte(s) spread`, "", "", ""],
+      [],
+      [`CARRY NÉGATIF (${negCarryRows.length} position(s))`, "", "", "", "", ""],
+      ["ISIN", "Description", "Asset Class", "Carry Brut/j (MAD)", "Financement/j (MAD)", "Carry Net/j (MAD)"],
+      ...negCarryRows.map((r) => [
+        r.isin ?? "",
+        r.description ?? "",
+        r.subAsset ?? "",
+        Math.round(n(r.cpnThetaMad)),
+        Math.round(n(r.dailyFundingMad || r.fundingCostMad)),
+        Math.round(n(r.netDailyMad)),
+      ]),
+      negCarryRows.length === 0 ? ["Aucune position en carry négatif", "", "", "", "", ""] : [],
+      [],
+      [`ÉCART SPREAD > 30bp vs TARGET (${spreadAlertRows.length} position(s))`, "", "", "", "", ""],
+      ["ISIN", "Description", "G-Spread Actuel (bp)", "Target Spread (bp)", "Gap (bp)", "P&L Éco (MAD)"],
+      ...spreadAlertRows.map((r) => [
+        r.isin ?? "",
+        r.description ?? "",
+        n(r.gSpreadBid),
+        n(r.targetSpread),
+        n(r.gSpreadBid) - n(r.targetSpread),
+        Math.round(n(r.pnlEconomicMad)),
+      ]),
+      spreadAlertRows.length === 0 ? ["Aucune alerte spread", "", "", "", "", ""] : [],
+    ].filter((row) => Array.isArray(row));
+    const wsAlert = XLSX.utils.aoa_to_sheet(alertData);
+    wsAlert["!freeze"] = { xSplit: 0, ySplit: 4 };
+    applyColWidths(wsAlert, [14, 30, 12, 18, 18, 18]);
+    applyNumFmt(wsAlert, 4, [3, 4, 5], "#,##0");
+    applyNumFmt(wsAlert, 9, [2, 3, 4], "0.0");
+    applyNumFmt(wsAlert, 9, [5], "#,##0");
+    XLSX.utils.book_append_sheet(wb, wsAlert, "Alertes");
+
+    /* ── [3/7] POSITIONS — toutes asset classes, triées par P&L décroissant ── */
+    const posHdr = [
+      "ISIN", "Description", "Asset Class", "Nominal (MUSD)", "Coupon %",
+      "Maturité", "WAP Dirty (%)", "Prix Marché (%)", "Perf WAP %",
+      "G-Spread Bid (bp)", "I-Spread Bid (bp)", "Target Spread (bp)", "Gap vs Target (bp)",
+      "P&L Éco (MAD)", "Carry Net/j (MAD)", "P&L Latent (MAD)", "Financement (MAD)",
+      "Duration Mod. (ans)", "DV01 (USD/bp)", "Signal", "Alerte Carry",
+    ];
+    const dashPos = dashboardRows.map((r) => {
+      const coupon = n(r.couponRate);
+      const cpnPct = coupon < 1 ? coupon * 100 : coupon;
+      const tgt = n(r.targetSpread);
+      const gBid = n(r.gSpreadBid);
+      return {
+        _pnl: n(r.pnlEconomicMad),
+        row: [
+          r.isin ?? "", r.description ?? "", r.subAsset ?? "",
+          n(r.netNominal), cpnPct, r.maturityDate ?? "",
+          n(r.lastWapDirty) * 100, n(r.dirtyMarket) * 100, n(r.perfWap) * 100,
+          gBid, n(r.iSpreadBid),
+          tgt > 0 ? tgt : null, tgt > 0 ? gBid - tgt : null,
+          Math.round(n(r.pnlEconomicMad)), Math.round(n(r.netDailyMad)),
+          Math.round(n(r.pnlLatentCcy) * usdMad), Math.round(n(r.fundingCostMad)),
+          n(r.modifiedDuration), Math.round(n(r.dv01Bond)),
+          r.decision ?? "", r.netDailyAlert ? "OUI" : "NON",
+        ],
+      };
+    });
+    const clnPos = (clnList || []).map((r) => {
+      const coupon = n(r.couponRate);
+      const cpnPct = coupon < 1 ? coupon * 100 : coupon;
+      return {
+        _pnl: n(r.plEcoMad),
+        row: [
+          r.isin ?? "", r.description ?? r.isin ?? "CLN", "CLN",
+          n(r.nominalUsd) / 1e6, cpnPct, r.maturityDate ?? "",
+          null, null, null, null, null, null, null,
+          Math.round(n(r.plEcoMad)), null,
+          Math.round(n(r.plLatentUsd || 0) * usdMad),
+          Math.round(n(r.fundingUsd || 0) * usdMad),
+          n(r.modifiedDuration || 0), null, "", "NON",
+        ],
+      };
+    });
+    const egpPos = (egpList || []).map((r) => {
+      const coupon = n(r.couponRate);
+      const cpnPct = coupon < 1 ? coupon * 100 : coupon;
+      return {
+        _pnl: n(r.plEcoMad),
+        row: [
+          r.isin ?? "", r.description ?? r.isin ?? "EGP Bill", "EGP Bill",
+          n(r.nominalUsd) / 1e6, cpnPct, r.maturityDate ?? "",
+          null, null, null, null, null, null, null,
+          Math.round(n(r.plEcoMad)), null, null, null,
+          n(r.modifiedDuration || 0), null, "", "NON",
+        ],
+      };
+    });
+    const posRows = [...dashPos, ...clnPos, ...egpPos]
+      .sort((a, b) => b._pnl - a._pnl)
+      .map((x) => x.row);
+    const wsPos = XLSX.utils.aoa_to_sheet([posHdr, ...posRows]);
+    wsPos["!freeze"] = { xSplit: 2, ySplit: 1 };
+    applyColWidths(wsPos, [14, 30, 12, 13, 9, 12, 12, 12, 10, 13, 13, 14, 15, 16, 15, 15, 16, 14, 12, 8, 12]);
+    applyNumFmt(wsPos, 1, [3], "#,##0.00");
+    applyNumFmt(wsPos, 1, [4, 6, 7, 8], "0.0000");
+    applyNumFmt(wsPos, 1, [9, 10, 11, 12], "0.0");
+    applyNumFmt(wsPos, 1, [13, 14, 15, 16], "#,##0");
+    applyNumFmt(wsPos, 1, [17], "0.00");
+    applyNumFmt(wsPos, 1, [18], "#,##0");
+    XLSX.utils.book_append_sheet(wb, wsPos, "Positions");
+
+    /* ── [4/7] OBJECTIFS & PROJECTIONS ── */
+    const objHdr = [
+      "Catégorie", `Objectif ${year} (MAD)`, "Réalisé YTD (MAD)", "% Réalisation",
+      "Proj. Pessimiste (MAD)", "Proj. Centrale (MAD)", "Proj. Optimiste (MAD)",
+      "Statut", "% Avancement Annuel",
+    ];
+    const objRows = [...rows, totRow].map((r) => [
+      r.label,
+      r.target,
+      r.actual,
+      r.realPct / 100,
+      r.projPess,
+      r.projCentral,
+      r.projOpt,
+      r.status?.lbl ?? "",
+      yearProg,
+    ]);
+    const wsObj = XLSX.utils.aoa_to_sheet([objHdr, ...objRows]);
+    wsObj["!freeze"] = { xSplit: 0, ySplit: 1 };
+    applyColWidths(wsObj, [20, 20, 18, 14, 22, 20, 20, 12, 18]);
+    applyNumFmt(wsObj, 1, [1, 2, 4, 5, 6], "#,##0");
+    applyNumFmt(wsObj, 1, [3, 8], "0.0%");
+    XLSX.utils.book_append_sheet(wb, wsObj, "Objectifs");
+
+    /* ── [5/7] RISQUES & SCÉNARIOS ── */
+    const { scenarios, ASSET_ROWS, dv01Total, dv01TotalMad: _dv01TotalMad, remainDays } = scenarioData;
+    const _xlsUsdMad = usdMad; const _xlsEurMad = parseFloat(rates?.eurMad || 10.418);
+    const portfolioDur = (() => {
+      const active = dashboardRows.filter(r => n(r.netNominal) > 0 && n(r.modifiedDuration) > 0);
+      const [sumWD, sumW] = active.reduce(([wd, w], r) => {
+        const fx = (r.currency||"USD").toUpperCase()==="EUR" ? _xlsEurMad : _xlsUsdMad;
+        const nomMad = n(r.netNominal) * fx;
+        return [wd + n(r.modifiedDuration) * nomMad, w + nomMad];
+      }, [0, 0]);
+      return sumW > 0 ? sumWD / sumW : 0;
+    })();
+    const riskData = [
+      ["MÉTRIQUES DE RISQUE PORTEFEUILLE", "", "", ""],
+      ["DV01 Total (USD/bp)", dv01Total, "", ""],
+      ["Duration Portefeuille Moy. Pondérée (ans)", portfolioDur, "", ""],
+      ["Jours ouvrés restants (estimation)", remainDays, "", ""],
+      [],
+      ["ANALYSE DE SCÉNARIOS — FIN D'ANNÉE", "", "", ""],
+      ["Scénario", "Choc Taux (bp)", "P&L Total Projeté (MAD)", ...ASSET_ROWS.map((a) => `${a.label} (MAD)`)],
+      ...scenarios.map((s) => [
+        s.label,
+        s.shockBps,
+        Math.round(s.total),
+        ...s.assetResults.map((a) => Math.round(a.yeProjection)),
+      ]),
+      [],
+      ["DÉCOMPOSITION DV01 PAR ASSET CLASS", "", "", ""],
+      ["Asset Class", "DV01 (USD/bp)", "P&L Actuel (MAD)", "Carry Restant YE (MAD)"],
+      ...ASSET_ROWS.map((r) => [r.label, Math.round(r.dv01 || 0), Math.round(r.actual), Math.round(r.carry)]),
+    ];
+    const wsRisk = XLSX.utils.aoa_to_sheet(riskData);
+    applyColWidths(wsRisk, [34, 16, 24, 20, 20, 16, 16]);
+    applyNumFmt(wsRisk, 6, [1], "0");
+    applyNumFmt(wsRisk, 6, [2, 3, 4, 5, 6], "#,##0");
+    applyNumFmt(wsRisk, 10, [1, 2, 3], "#,##0");
+    XLSX.utils.book_append_sheet(wb, wsRisk, "Risques & Scénarios");
+
+    /* ── [6/7] HISTORIQUE P&L ── */
+    const mMap = {};
+    (pnlDailyHistory || []).forEach((d) => {
+      if (!d.snapshotDate) return;
+      const m = d.snapshotDate.substring(0, 7);
+      if (!mMap[m]) mMap[m] = { pnl: 0, fin: 0, days: 0, pos: 0, best: -Infinity, worst: Infinity };
+      const v = n(d.pnlJourMad);
+      mMap[m].pnl += v;
+      mMap[m].fin += n(d.finTotalMad);
+      mMap[m].days++;
+      if (v > 0) mMap[m].pos++;
+      if (v > mMap[m].best) mMap[m].best = v;
+      if (v < mMap[m].worst) mMap[m].worst = v;
+    });
+    const monthlyRows = Object.entries(mMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([m, d]) => {
+        const [yr, mo] = m.split("-");
+        return [
+          `${MONTHS_FR[parseInt(mo) - 1]} ${yr}`,
+          Math.round(d.pnl),
+          Math.round(d.fin),
+          Math.round(d.best === -Infinity ? 0 : d.best),
+          Math.round(d.worst === Infinity ? 0 : d.worst),
+          d.pos,
+          d.days,
+        ];
+      });
+    const mHdr = ["Mois", "P&L Mensuel (MAD)", "Financement (MAD)", "Meilleure Journée (MAD)", "Pire Journée (MAD)", "Jours Positifs", "Nb Jours"];
+    const dailyHdr = ["Date", "P&L Jour (MAD)", "P&L Éco Cumulé (MAD)", "Financement (MAD)"];
+    const dailyRows = (pnlDailyHistory || []).map((d) => [
+      d.snapshotDate ?? "",
+      Math.round(n(d.pnlJourMad)),
+      Math.round(n(d.pnlEcoMad)),
+      Math.round(n(d.finTotalMad)),
+    ]);
+    const histData = [
+      [`HISTORIQUE MENSUEL ${year}`, "", "", "", "", "", ""],
+      mHdr,
+      ...monthlyRows,
+      [],
+      [`HISTORIQUE JOURNALIER (${(pnlDailyHistory || []).length} entrées)`, "", "", ""],
+      dailyHdr,
+      ...dailyRows,
+    ];
+    const wsHist = XLSX.utils.aoa_to_sheet(histData);
+    wsHist["!freeze"] = { xSplit: 0, ySplit: 2 };
+    applyColWidths(wsHist, [12, 20, 20, 22, 20, 14, 10]);
+    applyNumFmt(wsHist, 2, [1, 2, 3, 4], "#,##0");
+    XLSX.utils.book_append_sheet(wb, wsHist, "Historique P&L");
+
+    /* ── [7/7] CONTRIBUTION PAR ISIN ── */
+    const totalAbsPnl = dashboardRows.reduce((s, r) => s + Math.abs(n(r.pnlEconomicMad)), 0) || 1;
+    const isinContribs = dashboardRows
+      .filter((r) => n(r.pnlEconomicMad) !== 0)
+      .sort((a, b) => n(b.pnlEconomicMad) - n(a.pnlEconomicMad));
+    const contribHdr = ["ISIN", "Description", "Nominal (MUSD)", "P&L Éco (MAD)", "Contribution %", "P&L / Nominal (bp)"];
+    const contribRows = isinContribs.map((r) => {
+      const pnlVal = n(r.pnlEconomicMad);
+      const nom = n(r.netNominal);
+      return [
+        r.isin ?? "",
+        r.description ?? "",
+        nom,
+        Math.round(pnlVal),
+        (Math.abs(pnlVal) / totalAbsPnl) * (pnlVal >= 0 ? 1 : -1),
+        nom > 0 ? (pnlVal / (nom * 1e6)) * 10000 : null,
+      ];
+    });
+    const wsCont = XLSX.utils.aoa_to_sheet([contribHdr, ...contribRows]);
+    wsCont["!freeze"] = { xSplit: 0, ySplit: 1 };
+    applyColWidths(wsCont, [14, 32, 14, 16, 14, 16]);
+    applyNumFmt(wsCont, 1, [2], "#,##0.00");
+    applyNumFmt(wsCont, 1, [3], "#,##0");
+    applyNumFmt(wsCont, 1, [4], "0.00%");
+    applyNumFmt(wsCont, 1, [5], "0.0");
+    XLSX.utils.book_append_sheet(wb, wsCont, "Contribution ISIN");
+
+    /* ── ÉCRITURE ── */
+    XLSX.writeFile(wb, `AWB_MorningReport_${year}_${now.toISOString().slice(0, 10)}.xlsx`);
   }, [
     rows,
     totRow,
@@ -1412,11 +1391,15 @@ const ReportingView = () => {
     stats,
     pnlDailyHistory,
     dashboardRows,
+    clnList,
+    egpList,
     rates,
     year,
     traderName,
     yearProg,
     pnl,
+    scenarioData,
+    TOTAL_TARGET,
   ]);
 
   return (
@@ -1618,11 +1601,16 @@ const ReportingView = () => {
               </Button>
               <Button
                 size="small"
-                onClick={handleExportCsv}
+                onClick={handleExportExcel}
                 icon={<Download size={10} />}
-                title="Export CSV complet — 6 sections : objectifs, marchés, attribution, statistiques, historique mensuel/journalier, positions"
+                title="Morning Report Excel (.xlsx) — 6 onglets : Résumé, Positions, Objectifs, Risques &amp; Scénarios, Historique P&amp;L, Contribution ISIN"
+                style={{
+                  background: "rgba(0,202,255,0.06)",
+                  borderColor: "rgba(0,202,255,0.18)",
+                  color: "var(--cyan)",
+                }}
               >
-                CSV Complet
+                Morning Report Excel
               </Button>
               <Button
                 size="small"
@@ -1767,59 +1755,303 @@ const ReportingView = () => {
             />
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 0,
-              borderBottom: "1px solid var(--b1)",
-            }}
-          >
-            {TABS.map(({ id, label, icon: Icon }) => {
-              const active = activeTab === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  style={{
-                    padding: "7px 14px",
-                    border: "none",
-                    cursor: "pointer",
-                    borderRadius: 0,
-                    background: active ? "var(--surf)" : "transparent",
-                    borderBottom: active
-                      ? "2px solid var(--warn)"
-                      : "2px solid transparent",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    transition: "all 0.14s",
-                  }}
-                >
-                  <Icon
-                    size={11}
-                    style={{ color: active ? "var(--warn)" : "var(--tx3)" }}
-                  />
-                  <span
-                    style={{
-                      fontFamily: "var(--f-disp)",
-                      fontWeight: 700,
-                      fontSize: "0.60rem",
-                      letterSpacing: "0.07em",
-                      color: active ? "var(--tx1)" : "var(--tx3)",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            size="small"
+            className="awb-tabs-nav-only awb-no-print"
+            tabBarStyle={{ marginBottom: 0, paddingLeft: 8 }}
+            items={TABS.map(({ id, label, icon: Icon }) => ({
+              key: id,
+              label: (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <Icon size={11} />
+                  {label}
+                </span>
+              ),
+            }))}
+          />
         </div>
 
         {/* ── TAB CONTENT ── */}
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px" }}>
-          {/* SECTION 1 : OBJECTIFS */}
+          {/* ═══════════════════════════════════════════════════════
+             MORNING REPORT
+          ════════════════════════════════════════════════════════ */}
+          {activeTab === "morning" && (() => {
+            const n = v => parseFloat(v ?? 0);
+            const lastDaily = pnlDailyHistory?.length
+              ? pnlDailyHistory[pnlDailyHistory.length - 1] : null;
+            const pnlHier = lastDaily ? n(lastDaily.pnlJourMad) : null;
+            const dateHier = lastDaily?.snapshotDate;
+
+            const todayCarry  = dashboardRows.reduce((s, r) => s + n(r.netDailyMad), 0);
+            const todayTheta  = dashboardRows.reduce((s, r) => s + n(r.cpnThetaMad), 0);
+            const todayFin    = dashboardRows.reduce((s, r) => s + n(r.dailyFundingMad || r.fundingCostMad), 0);
+            const negCarry    = dashboardRows.filter(r => r.netDailyAlert);
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+            // Next coupons ≤45 days — computed inline (IIFE, no hook)
+            const today45 = new Date();
+            const nextCoupons = dashboardRows
+              .filter(r => r.couponRate && r.maturityDate && r.netNominal)
+              .map(r => {
+                const mat = new Date(r.maturityDate);
+                if (isNaN(mat.getTime())) return null;
+                const m = mat.getMonth(), d = mat.getDate(), yr = today45.getFullYear();
+                const m2 = (m + 6) % 12;
+                const candidates = [
+                  new Date(yr, m, d), new Date(yr, m2, d),
+                  new Date(yr + 1, m, d), new Date(yr + 1, m2, d),
+                ].filter(dt => dt > today45).sort((a, b) => a - b);
+                const next = candidates[0];
+                if (!next) return null;
+                const daysLeft = Math.round((next - today45) / 86400000);
+                if (daysLeft > 45) return null;
+                const rate = parseFloat(r.couponRate);
+                const effectiveRate = rate < 1 ? rate : rate / 100;
+                const nominal = parseFloat(r.netNominal);
+                const amtUsd = (effectiveRate * nominal) / 2;
+                return { isin: r.isin, desc: r.description, daysLeft, amtUsd, next, color: r.subAsset };
+              })
+              .filter(Boolean)
+              .sort((a, b) => a.daysLeft - b.daysLeft)
+              .slice(0, 6);
+
+            const allPnlRanked = [...dashboardRows.map(r => ({ isin: r.isin, desc: r.description, pnl: n(r.pnlEconomicMad), carry: n(r.netDailyMad) })), ...(clnList || []).map(r => ({ isin: r.isin, desc: r.description || "CLN", pnl: n(r.plEcoMad), carry: 0 })), ...(egpList || []).map(r => ({ isin: r.isin, desc: r.description || "EGP Bill", pnl: n(r.plEcoMad), carry: 0 }))].filter(r => r.pnl !== 0).sort((a, b) => b.pnl - a.pnl);
+            const top3 = allPnlRanked.slice(0, 3);
+            const bot3 = allPnlRanked.slice(-3).reverse();
+
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* ── Date / identity header ── */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderRadius: 8, background: "var(--surf)", border: "1px solid var(--b1)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <Sun size={18} style={{ color: "var(--warn)" }} />
+                    <div>
+                      <div style={{ fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.82rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--tx1)" }}>
+                        Morning Report — {printDate}
+                      </div>
+                      <div style={{ fontFamily: "var(--f-body)", fontSize: "0.62rem", color: "var(--tx3)", marginTop: 2 }}>
+                        Desk International Fixed Income · {traderName} · généré à {timeStr}
+                      </div>
+                    </div>
+                  </div>
+                  <span style={{ fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.52rem", letterSpacing: "0.12em", padding: "3px 10px", borderRadius: 4, background: "rgba(255,43,96,0.10)", border: "1px solid rgba(255,43,96,0.25)", color: "var(--loss)" }}>
+                    CONFIDENTIEL
+                  </span>
+                </div>
+
+                {/* ── 5 headline KPIs ── */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
+                  {[
+                    { label: "P&L Hier (J-1)",   fmt: pnlHier != null ? fM(pnlHier) : "—",   sfx: pnlHier != null ? "MAD" : "",  sub: dateHier ? `Clôture ${fDate(dateHier)}` : "Non disponible",   color: pnlHier != null ? (pnlHier >= 0 ? "var(--profit)" : "var(--loss)") : "var(--tx3)", Icon: pnlHier == null ? Clock : pnlHier >= 0 ? TrendingUp : TrendingDown },
+                    { label: "Carry Net / j",     fmt: fM(todayCarry),                          sfx: "MAD",                         sub: "Coupon − Financement",                                       color: todayCarry >= 0 ? "var(--profit)" : "var(--loss)", Icon: Activity },
+                    { label: "Theta Coupon / j",  fmt: fM(todayTheta),                          sfx: "MAD",                         sub: "Revenus courus estimés",                                     color: "var(--cyan)", Icon: TrendingUp },
+                    { label: "Financement / j",   fmt: fM(todayFin),                            sfx: "MAD",                         sub: "Coût portage total",                                         color: "var(--warn)", Icon: TrendingDown },
+                    { label: "YTD vs Objectif",   fmt: fPct((pnl.total / TOTAL_TARGET) * 100), sfx: "",                            sub: `${fM(pnl.total)} / ${fM(TOTAL_TARGET)} MAD`,                color: statusOf((pnl.total / TOTAL_TARGET) * 100, yearProg * 100).col, Icon: Target },
+                  ].map(({ label, fmt, sfx, sub, color, Icon }) => (
+                    <Card key={label} size="small" style={{ borderTop: `2px solid ${color}` }} styles={{ body: { padding: "10px 13px" } }}>
+                      <Statistic
+                        title={
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.53rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--tx3)" }}>{label}</span>
+                            <Icon size={11} style={{ color, opacity: 0.65 }} />
+                          </div>
+                        }
+                        value={fmt}
+                        suffix={sfx ? <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.52rem", color: "var(--tx3)", fontWeight: 400, marginLeft: 2 }}>{sfx}</span> : undefined}
+                        valueStyle={{ fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: "1.05rem", lineHeight: 1, color, letterSpacing: "-0.02em" }}
+                      />
+                      {sub && <div style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)", marginTop: 4, lineHeight: 1.3 }}>{sub}</div>}
+                    </Card>
+                  ))}
+                </div>
+
+                {/* ── Bannière alerte globale ── */}
+                {negCarry.length > 0 && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message={`${negCarry.length} position${negCarry.length > 1 ? "s" : ""} en carry négatif — financement supérieur au coupon`}
+                    description={negCarry.slice(0, 4).map(r => r.description || r.isin).join(" · ")}
+                    style={{ fontSize: "0.70rem" }}
+                  />
+                )}
+                {negCarry.length === 0 && (
+                  <Alert
+                    type="success"
+                    showIcon
+                    message="Toutes les positions sont en carry positif — book sain"
+                    style={{ fontSize: "0.70rem" }}
+                  />
+                )}
+
+                {/* ── Two columns: Carry par Asset + Alertes ── */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  {/* Carry par asset class */}
+                  <div className="card" style={{ overflow: "hidden" }}>
+                    <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 7 }}>
+                      <Activity size={12} style={{ color: "var(--cyan)" }} />
+                      <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.63rem", letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx1)" }}>
+                        Carry Net / j par Asset Class
+                      </span>
+                    </div>
+                    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                      {rows.map(r => {
+                        const rCarry = dashboardRows.filter(d => (d.subAsset || "").toLowerCase().includes(r.key === "moroc" ? "mor" : r.key === "ocp" ? "ocp" : r.key)).reduce((s, d) => s + n(d.netDailyMad), 0);
+                        const rTheta = dashboardRows.filter(d => (d.subAsset || "").toLowerCase().includes(r.key === "moroc" ? "mor" : r.key === "ocp" ? "ocp" : r.key)).reduce((s, d) => s + n(d.cpnThetaMad), 0);
+                        return (
+                          <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontFamily: "var(--f-disp)", fontWeight: 600, fontSize: "0.63rem", color: r.color, width: 110, flexShrink: 0 }}>{r.label}</span>
+                            <div style={{ flex: 1, height: 5, borderRadius: 3, background: "var(--elev)", overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${Math.min(Math.abs(rCarry) / Math.max(Math.abs(todayCarry), 1) * 100, 100)}%`, background: rCarry >= 0 ? r.color : "var(--loss)", borderRadius: 3, opacity: 0.8 }} />
+                            </div>
+                            <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.68rem", fontWeight: 700, color: rCarry >= 0 ? "var(--profit)" : "var(--loss)", width: 80, textAlign: "right", flexShrink: 0 }}>
+                              {fM(rCarry)} MAD
+                            </span>
+                          </div>
+                        );
+                      })}
+                      <div style={{ paddingTop: 8, borderTop: "1px solid var(--b1)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.60rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--tx2)" }}>TOTAL</span>
+                        <span style={{ fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: "0.80rem", color: todayCarry >= 0 ? "var(--profit)" : "var(--loss)" }}>
+                          {fM(todayCarry)} MAD
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Alertes carry négatif */}
+                  <Card
+                    size="small"
+                    styles={{ body: { padding: 0 } }}
+                    title={
+                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        <AlertTriangle size={12} style={{ color: negCarry.length ? "#ff4d4f" : "#52c41a" }} />
+                        <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.63rem", letterSpacing: "0.10em", textTransform: "uppercase" }}>
+                          Alertes Carry Négatif
+                        </span>
+                      </div>
+                    }
+                    extra={
+                      negCarry.length === 0
+                        ? <Tag color="success" style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.52rem", letterSpacing: "0.09em" }}>✓ AUCUNE</Tag>
+                        : <Badge count={negCarry.length} color="#ff4d4f" style={{ fontFamily: "var(--f-disp)", fontWeight: 700 }} />
+                    }
+                  >
+                    {negCarry.length === 0 ? (
+                      <div style={{ padding: "20px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                        <CheckCircle size={20} style={{ color: "var(--profit)", opacity: 0.7 }} />
+                        <span style={{ fontFamily: "var(--f-body)", fontSize: "0.68rem", color: "var(--tx3)" }}>Toutes les positions sont en carry positif.</span>
+                      </div>
+                    ) : (
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead>
+                            <tr style={{ background: "var(--thead-bg)" }}>
+                              {["Obligation", "Theta/j", "Fin./j", "Net/j"].map(h => (
+                                <th key={h} style={{ padding: "6px 10px", fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.54rem", letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--tx3)", borderBottom: "1px solid var(--b1)", textAlign: h === "Obligation" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {negCarry.map((r, i) => (
+                              <tr key={r.isin} style={{ background: i % 2 === 0 ? "var(--tr-even-bg)" : "transparent" }}>
+                                <td style={{ padding: "6px 10px", fontSize: "0.68rem", color: "var(--tx1)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{r.description || r.isin}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: "0.65rem", color: "var(--cyan)" }}>{fM(r.cpnThetaMad)}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: "0.65rem", color: "var(--warn)" }}>{fM(r.dailyFundingMad || r.fundingCostMad)}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: "0.68rem", fontWeight: 700, color: "var(--loss)" }}>{fM(r.netDailyMad)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                </div>
+
+                {/* ── Contexte de marché ── */}
+                <MarketContextPanel rates={rates} />
+
+                {/* ── Prochains coupons (45 jours) ── */}
+                {nextCoupons.length > 0 && (
+                  <div className="card" style={{ overflow: "hidden" }}>
+                    <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--b1)", display: "flex", alignItems: "center", gap: 7 }}>
+                      <Calendar size={12} style={{ color: "var(--cyan)" }} />
+                      <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.63rem", letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx1)" }}>
+                        Prochains Coupons — 45 Jours
+                      </span>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: "var(--thead-bg)" }}>
+                            {["Obligation", "Date", "Jours", "Montant USD", "Urgence"].map(h => (
+                              <th key={h} style={{ padding: "6px 12px", fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.54rem", letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--tx3)", borderBottom: "1px solid var(--b1)", textAlign: h === "Obligation" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {nextCoupons.map((e, i) => {
+                            const urg = e.daysLeft < 15;
+                            const soon = e.daysLeft < 30;
+                            const col = urg ? "var(--loss)" : soon ? "var(--cyan)" : "var(--profit)";
+                            return (
+                              <tr key={e.isin} style={{ background: urg ? "rgba(255,43,96,0.04)" : i % 2 === 0 ? "var(--tr-even-bg)" : "transparent" }}>
+                                <td style={{ padding: "7px 12px", fontSize: "0.70rem", color: "var(--tx1)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.desc || e.isin}</td>
+                                <td style={{ padding: "7px 12px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: "0.67rem", color: "var(--tx2)" }}>
+                                  {e.next.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}
+                                </td>
+                                <td style={{ padding: "7px 12px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: "0.72rem", fontWeight: 700, color: col }}>{e.daysLeft}j</td>
+                                <td style={{ padding: "7px 12px", textAlign: "right", fontFamily: "var(--f-mono)", fontSize: "0.68rem", color: "var(--cyan)", fontWeight: 600 }}>
+                                  {e.amtUsd.toLocaleString("fr-FR", { maximumFractionDigits: 0 })} USD
+                                </td>
+                                <td style={{ padding: "7px 12px", textAlign: "right" }}>
+                                  {urg
+                                    ? <span style={{ fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.52rem", letterSpacing: "0.09em", padding: "2px 7px", borderRadius: 4, background: "rgba(255,43,96,0.12)", border: "1px solid rgba(255,43,96,0.28)", color: "var(--loss)" }}>URGENT</span>
+                                    : soon
+                                      ? <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.52rem", letterSpacing: "0.09em", padding: "2px 7px", borderRadius: 4, background: "rgba(0,202,255,0.10)", border: "1px solid rgba(0,202,255,0.22)", color: "var(--cyan)" }}>BIENTÔT</span>
+                                      : <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.52rem", letterSpacing: "0.09em", padding: "2px 7px", borderRadius: 4, background: "rgba(0,232,153,0.08)", border: "1px solid rgba(0,232,153,0.18)", color: "var(--profit)" }}>OK</span>
+                                  }
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Top 3 / Bottom 3 ── */}
+                {(top3.length > 0 || bot3.length > 0) && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                    {[{ title: "▲ Top 3 Contributeurs YTD", items: top3, col: "var(--profit)" }, { title: "▼ Bottom 3 Détracteurs YTD", items: bot3, col: "var(--loss)" }].map(({ title, items, col }) => (
+                      <div key={title} className="card" style={{ padding: "12px 16px" }}>
+                        <div style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.60rem", letterSpacing: "0.10em", textTransform: "uppercase", color: col, marginBottom: 10 }}>{title}</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                          {items.map((r, i) => (
+                            <div key={r.isin} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: i < items.length - 1 ? "1px solid var(--b0)" : "none" }}>
+                              <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.62rem", color: "var(--cyan)", width: 100, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.isin}</span>
+                              <span style={{ fontFamily: "var(--f-body)", fontSize: "0.63rem", color: "var(--tx2)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.desc || "").split(" ").slice(0, 3).join(" ")}</span>
+                              <span style={{ fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: "0.70rem", color: r.pnl >= 0 ? "var(--profit)" : "var(--loss)", flexShrink: 0 }}>
+                                {r.pnl >= 0 ? "+" : ""}{(r.pnl / 1e6).toFixed(2)}M
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+        {/* SECTION 1 : OBJECTIFS */}
           <div
             className="awb-report-section"
             style={{ display: activeTab === "objectifs" ? "block" : "none" }}
@@ -1830,6 +2062,31 @@ const ReportingView = () => {
 
             {/* Market context panel */}
             <MarketContextPanel rates={rates} />
+
+            {/* Cumulative P&L vs Target trajectory */}
+            {pnlDailyHistory && pnlDailyHistory.length >= 2 && (
+              <div className="card slide-up stagger-1" style={{ padding: "14px 18px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Activity size={13} style={{ color: "var(--profit)" }} />
+                    <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.65rem", letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx1)" }}>
+                      P&L Économique YTD vs Trajectoire Objectif {year}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <div style={{ width: 18, height: 2, background: "var(--warn)", borderRadius: 1, opacity: 0.7 }} />
+                      <span style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)" }}>Objectif</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <div style={{ width: 18, height: 2, background: "#22C55E", borderRadius: 1 }} />
+                      <span style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)" }}>Réalisé</span>
+                    </div>
+                  </div>
+                </div>
+                <CumulativePnlChart history={pnlDailyHistory} target={TOTAL_TARGET} />
+              </div>
+            )}
 
             <div className="card" style={{ overflow: "hidden" }}>
               <div
@@ -1854,6 +2111,18 @@ const ReportingView = () => {
                 >
                   Réalisation vs Objectifs · Scénarios {year}
                 </span>
+                <Tooltip
+                  title={
+                    <div style={{ fontFamily: "var(--f-body)", fontSize: "0.72rem", lineHeight: 1.6 }}>
+                      <div><b>Projection centrale</b> : rythme J × 252 jours ouvrés</div>
+                      <div><b>Pessimiste</b> : ×0.75 — <b>Optimiste</b> : ×1.25</div>
+                      <div style={{ marginTop: 4, opacity: 0.7 }}>Avancement annuel : {(yearProg * 100).toFixed(1)}% · {tradingDays} j écoulés · ~{252 - tradingDays} j restants</div>
+                    </div>
+                  }
+                  placement="topRight"
+                >
+                  <span style={{ marginLeft: 6, color: "var(--tx3)", cursor: "help", fontSize: "0.72rem", fontFamily: "var(--f-body)" }}>ⓘ</span>
+                </Tooltip>
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2012,21 +2281,9 @@ const ReportingView = () => {
                               borderLeft: "1px solid var(--b0)",
                             }}
                           >
-                            <span
-                              style={{
-                                padding: "3px 8px",
-                                borderRadius: 4,
-                                fontFamily: "var(--f-disp)",
-                                fontSize: "0.57rem",
-                                fontWeight: 700,
-                                letterSpacing: "0.08em",
-                                background: `${r.status.col}18`,
-                                border: `1px solid ${r.status.col}35`,
-                                color: r.status.col,
-                              }}
-                            >
+                            <Tag style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.57rem", letterSpacing: "0.08em", background: `${r.status.col}18`, borderColor: `${r.status.col}40`, color: r.status.col, margin: 0 }}>
                               {r.status.lbl}
-                            </span>
+                            </Tag>
                           </td>
                         </tr>
                       );
@@ -2127,42 +2384,13 @@ const ReportingView = () => {
                           borderLeft: "1px solid var(--b1)",
                         }}
                       >
-                        <span
-                          style={{
-                            padding: "3px 8px",
-                            borderRadius: 4,
-                            fontFamily: "var(--f-disp)",
-                            fontSize: "0.57rem",
-                            fontWeight: 800,
-                            letterSpacing: "0.08em",
-                            background: `${totRow.status.col}18`,
-                            border: `1px solid ${totRow.status.col}35`,
-                            color: totRow.status.col,
-                          }}
-                        >
+                        <Tag style={{ fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.57rem", letterSpacing: "0.08em", background: `${totRow.status.col}18`, borderColor: `${totRow.status.col}40`, color: totRow.status.col, margin: 0 }}>
                           {totRow.status.lbl}
-                        </span>
+                        </Tag>
                       </td>
                     </tr>
                   </tfoot>
                 </table>
-              </div>
-              <div
-                style={{
-                  padding: "8px 16px",
-                  borderTop: "1px solid var(--b0)",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--f-body)",
-                    fontSize: "0.58rem",
-                    color: "var(--tx3)",
-                  }}
-                >
-                  Projection = rythme journalier × 252 jours ouvrés · Pessimiste
-                  ×0.75 · Centrale ×1.00 · Optimiste ×1.25
-                </span>
               </div>
             </div>
           </div>
@@ -2183,28 +2411,24 @@ const ReportingView = () => {
               }}
             >
               <div className="card" style={{ padding: "16px 18px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                    marginBottom: 16,
-                  }}
-                >
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
                   <BarChart2 size={13} style={{ color: "var(--cyan)" }} />
-                  <span
-                    style={{
-                      fontFamily: "var(--f-disp)",
-                      fontWeight: 700,
-                      fontSize: "0.65rem",
-                      letterSpacing: "0.10em",
-                      textTransform: "uppercase",
-                      color: "var(--tx1)",
-                    }}
-                  >
-                    Décomposition du P&L
+                  <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.65rem", letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx1)" }}>
+                    P&L Bridge — Waterfall
                   </span>
                 </div>
+                <WaterfallChart
+                  carry={attribution.carry}
+                  latent={attribution.latent}
+                  realized={attribution.realized}
+                  funding={attribution.funding}
+                  net={pnl.total}
+                />
+                <Divider style={{ margin: "14px 0 10px" }}>
+                  <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.58rem", letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--tx3)" }}>
+                    Détail par composante
+                  </span>
+                </Divider>
                 <AttributionBar
                   label="Coupon / Carry (YTD estimé)"
                   value={attribution.carry}
@@ -2744,7 +2968,7 @@ const ReportingView = () => {
           {/* SECTION SCENARIOS */}
           {activeTab === "scenarios" &&
             (() => {
-              const { scenarios, ASSET_ROWS, remainDays, dv01Total } =
+              const { scenarios, ASSET_ROWS, remainDays, dv01Total, dv01TotalMad } =
                 scenarioData;
               const usdMad = parseFloat(rates?.usdMad || 9.251);
 
@@ -2778,6 +3002,19 @@ const ReportingView = () => {
                       >
                         Hypothèses de Choc de Taux — Projection 31 Déc {year}
                       </span>
+                      <Tooltip
+                        title={
+                          <div style={{ fontFamily: "var(--f-body)", fontSize: "0.72rem", lineHeight: 1.6 }}>
+                            <div><b>Formule</b> : P&L projeté = Réalisé YTD + Carry estimé − DV01 × Δbp</div>
+                            <div><b>DV01</b> exprimé en MAD/bp (EUR et USD convertis aux taux du jour)</div>
+                            <div><b>Carry estimé</b> : net daily MAD × jours restants (~{252 - tradingDays} j)</div>
+                            <div style={{ marginTop: 4, opacity: 0.7 }}>Sans ajustement convexité · Source taux : Bloomberg</div>
+                          </div>
+                        }
+                        placement="topRight"
+                      >
+                        <span style={{ marginLeft: 6, color: "var(--tx3)", cursor: "help", fontSize: "0.72rem", fontFamily: "var(--f-body)" }}>ⓘ</span>
+                      </Tooltip>
                       <span
                         style={{
                           marginLeft: "auto",
@@ -2791,7 +3028,7 @@ const ReportingView = () => {
                         }}
                       >
                         DV01 portefeuille :{" "}
-                        {((dv01Total * usdMad) / 1e3).toFixed(0)} k MAD/bp ·{" "}
+                        {(dv01TotalMad / 1e3).toFixed(0)} k MAD/bp ·{" "}
                         {remainDays} j restants
                       </span>
                     </div>
@@ -2898,7 +3135,7 @@ const ReportingView = () => {
                             }}
                           >
                             Impact portefeuille ≈{" "}
-                            {fM(-dv01Total * s.shockBps * usdMad)} MAD
+                            {fM(-dv01TotalMad * s.shockBps)} MAD
                           </div>
                         </div>
                       ))}
@@ -2930,6 +3167,28 @@ const ReportingView = () => {
                         Projection P&L au 31 Décembre {year}
                       </span>
                     </div>
+                    {/* Alert si scénario pessimiste < 50% de l'objectif */}
+                    {scenarios[0]?.total < TOTAL_TARGET * 0.5 && (
+                      <div style={{ padding: "0 16px 12px" }}>
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message={`Scénario pessimiste : ${fMAD(scenarios[0].total)} — ${fPct((scenarios[0].total / TOTAL_TARGET) * 100)} de l'objectif annuel`}
+                          description="Hausse de taux significative — révision des couvertures futures recommandée."
+                          style={{ fontSize: "0.68rem" }}
+                        />
+                      </div>
+                    )}
+                    {scenarios[0]?.total >= TOTAL_TARGET && (
+                      <div style={{ padding: "0 16px 12px" }}>
+                        <Alert
+                          type="success"
+                          showIcon
+                          message="Même en scénario pessimiste, l'objectif annuel est atteint."
+                          style={{ fontSize: "0.68rem" }}
+                        />
+                      </div>
+                    )}
                     <div style={{ overflowX: "auto" }}>
                       <table
                         style={{ width: "100%", borderCollapse: "collapse" }}
@@ -3152,17 +3411,6 @@ const ReportingView = () => {
                         borderTop: "1px solid var(--b0)",
                       }}
                     >
-                      <span
-                        style={{
-                          fontFamily: "var(--f-body)",
-                          fontSize: "0.58rem",
-                          color: "var(--tx3)",
-                        }}
-                      >
-                        Projection = Réalisé YTD + Carry estimé + Impact DV01 ×
-                        Δy · Sans ajustement de convexité · Objectif desk :{" "}
-                        {fMAD(TOTAL_TARGET)}
-                      </span>
                     </div>
                   </div>
 
@@ -3286,6 +3534,11 @@ const ReportingView = () => {
                   </span>
                 </div>
                 <MonthlyChart history={pnlDailyHistory} />
+                {pnlDailyHistory && pnlDailyHistory.length >= 5 && (
+                  <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--b1)" }}>
+                    <DrawdownChart history={pnlDailyHistory} />
+                  </div>
+                )}
               </div>
 
               {pnlDailyHistory &&
@@ -3431,42 +3684,44 @@ const ReportingView = () => {
                 }}
               >
                 {(() => {
+                  // FX rates (fallback to indicative values if not loaded yet)
                   const bd = globalDashboard?.breakdown;
                   const eurMad = parseFloat(rates?.eurMad || 10.418);
                   const usdMad = parseFloat(rates?.usdMad || 9.251);
-                  const ebNomMad = parseFloat(bd?.EUROBOND?.nominalMad || 0);
-                  const clnNomMad = parseFloat(bd?.CLN?.nominalMad || 0);
-                  const egpNomMad = parseFloat(bd?.EGP_BILL?.nominalMad || 0);
-                  const dynamicLimits = [
-                    {
-                      label: "Eurobonds (EUR)",
-                      limit: 280e6,
-                      currency: "EUR",
-                      used: ebNomMad / eurMad,
-                      color: "var(--eb)",
-                    },
-                    {
-                      label: "CLN Maroc (USD)",
-                      limit: 50e6,
-                      currency: "USD",
-                      used: clnNomMad / usdMad,
-                      color: "var(--cln)",
-                    },
-                    {
-                      label: "CLN GCC (USD)",
-                      limit: 30e6,
-                      currency: "USD",
-                      used: 0,
-                      color: "#7C3AED",
-                    },
-                    {
-                      label: "EGP Bills (USD)",
-                      limit: 20e6,
-                      currency: "USD",
-                      used: egpNomMad / usdMad,
-                      color: "var(--egp)",
-                    },
-                  ];
+
+                  // Consommation réelle (nominal en MAD) par catégorie, issue du portefeuille
+                  const usedMadByCategory = {
+                    EUROBONDS: parseFloat(bd?.EUROBOND?.nominalMad || 0),
+                    CLN_MOROC: parseFloat(bd?.CLN?.nominalMad || 0),
+                    CLN_GCC: 0,
+                    EGP_BILLS: parseFloat(bd?.EGP_BILL?.nominalMad || 0),
+                  };
+                  const fxByCurrency = { EUR: eurMad, USD: usdMad };
+
+                  // Plafonds pilotés par l'admin (table portfolio_limit).
+                  // Repli sur les valeurs statiques uniquement si le backend n'a rien renvoyé.
+                  const limitsSource =
+                    exposureLimits && exposureLimits.length > 0
+                      ? exposureLimits.map((l) => ({
+                          label: l.portfolioName,
+                          limit: parseFloat(l.limitMeur) * 1e6,
+                          currency: l.currency || "EUR",
+                          color: l.colorToken || "var(--cyan)",
+                          category: l.category,
+                        }))
+                      : [
+                          { label: "Eurobonds (EUR)", limit: 280e6, currency: "EUR", color: "var(--eb)",  category: "EUROBONDS" },
+                          { label: "CLN Maroc (USD)",  limit: 50e6,  currency: "USD", color: "var(--cln)", category: "CLN_MOROC" },
+                          { label: "CLN GCC (USD)",    limit: 30e6,  currency: "USD", color: "#7C3AED",    category: "CLN_GCC" },
+                          { label: "EGP Bills (USD)",  limit: 20e6,  currency: "USD", color: "var(--egp)", category: "EGP_BILLS" },
+                        ];
+
+                  const dynamicLimits = limitsSource.map((l) => {
+                    const usedMad = usedMadByCategory[l.category] ?? 0;
+                    const fx = fxByCurrency[l.currency] || eurMad;
+                    return { ...l, used: usedMad / fx };
+                  });
+
                   return dynamicLimits.map((l) => (
                     <LimitGauge key={l.label} {...l} />
                   ));
@@ -3503,153 +3758,81 @@ const ReportingView = () => {
                     gap: 12,
                   }}
                 >
-                  {[
+                  {(() => {
+                    const _usdMad = parseFloat(rates?.usdMad || 9.251);
+                    const _eurMad = parseFloat(rates?.eurMad || 10.418);
+                    // Nominal-weighted avg duration using MAD-equivalent nominal as weight
+                    const wAvgDur = (rows, nomKey) => {
+                      const [sumWD, sumW] = rows.reduce(([wd, w], r) => {
+                        // dashboardRows → modifiedDuration, ExternalPnlSnapshot → duration
+                        const dur = parseFloat(r.modifiedDuration || r.duration || 0);
+                        const nom = parseFloat(r[nomKey] || r.netNominal || 0);
+                        const fxR = (r.currency || "USD").toUpperCase() === "EUR" ? _eurMad : _usdMad;
+                        const nomMad = nom * fxR;
+                        return [wd + dur * nomMad, w + nomMad];
+                      }, [0, 0]);
+                      return sumW > 0 ? (sumWD / sumW).toFixed(2) : "—";
+                    };
+                    // Plafonds de duration pilotés par l'admin (PortfolioLimit.maxDurationYears).
+                    // Repli sur les valeurs par défaut si le backend n'a pas encore répondu.
+                    const durByCat = {};
+                    (exposureLimits || []).forEach((l) => {
+                      const d = parseFloat(l.maxDurationYears);
+                      if (l.category && !Number.isNaN(d)) durByCat[l.category] = d;
+                    });
+                    const maxDur = (cat, fallback) =>
+                      durByCat[cat] != null ? durByCat[cat] : fallback;
+                    return [
                     {
                       label: "Eurobonds (Maroc+OCP)",
-                      max: 7.0,
-                      current: parseFloat(
-                        dashboardRows
-                          .filter((r) =>
-                            (r.subAsset || "").toLowerCase().includes("bond"),
-                          )
-                          .reduce(
-                            (s, r, _, a) => {
-                              const n = parseFloat(r.modifiedDuration || 0);
-                              const w = parseFloat(r.netNominal || 0);
-                              return [s[0] + n * w, s[1] + w];
-                            },
-                            [0, 0],
-                          )
-                          .reduce((a, b, i) => (i === 0 ? a : a / b), 0) || 0,
-                      ).toFixed(2),
+                      max: maxDur("EUROBONDS", 7.0),
+                      current: parseFloat(wAvgDur(dashboardRows.filter(r => (r.subAsset||"").toLowerCase().includes("bond")), "netNominal") || 0),
                       color: "var(--eb)",
                     },
                     {
                       label: "CLN",
-                      max: 5.0,
-                      current: parseFloat(
-                        clnList
-                          .filter((r) => r.modifiedDuration)
-                          .reduce(
-                            (s, r, _, a) => {
-                              const n = parseFloat(r.modifiedDuration || 0);
-                              const w = parseFloat(r.nominalUsd || 0);
-                              return [s[0] + n * w, s[1] + w];
-                            },
-                            [0, 0],
-                          )
-                          .reduce((a, b, i) => (i === 0 ? a : a / b), 0) || 0,
-                      ).toFixed(2),
+                      max: maxDur("CLN_MOROC", 5.0),
+                      current: parseFloat(wAvgDur(clnList.filter(r => r.duration || r.modifiedDuration), "nominalUsd") || 0),
                       color: "var(--cln)",
                     },
                     {
                       label: "EGP Bills",
-                      max: 0.25,
-                      current: parseFloat(
-                        egpList
-                          .filter((r) => r.modifiedDuration)
-                          .reduce(
-                            (s, r, _, a) => {
-                              const n = parseFloat(r.modifiedDuration || 0);
-                              const w = parseFloat(r.nominalUsd || 0);
-                              return [s[0] + n * w, s[1] + w];
-                            },
-                            [0, 0],
-                          )
-                          .reduce((a, b, i) => (i === 0 ? a : a / b), 0) || 0,
-                      ).toFixed(2),
+                      max: maxDur("EGP_BILLS", 1.0),
+                      current: parseFloat(wAvgDur(egpList.filter(r => r.duration || r.modifiedDuration), "nominalUsd") || 0),
                       color: "var(--egp)",
                     },
-                  ].map(({ label, max, current, color }) => {
+                  ]})().map(({ label, max, current, color }) => {
                     const pct = max > 0 ? (parseFloat(current) / max) * 100 : 0;
-                    const over = pct > 100,
-                      warn = pct > 85;
-                    const col = over
-                      ? "var(--loss)"
-                      : warn
-                        ? "var(--warn)"
-                        : color;
+                    const over = pct > 100, warn = pct > 85;
+                    const col = over ? "#ff4d4f" : warn ? "#faad14" : color;
                     return (
-                      <div
+                      <Card
                         key={label}
-                        style={{
-                          padding: "12px 14px",
-                          borderRadius: 8,
-                          background: "var(--surf)",
-                          border: `1px solid ${over ? "rgba(255,43,96,0.25)" : "var(--b1)"}`,
-                          borderLeft: `3px solid ${col}`,
-                        }}
+                        size="small"
+                        style={{ borderLeft: `3px solid ${col}`, border: over ? "1px solid rgba(255,77,79,0.35)" : undefined }}
+                        styles={{ body: { padding: "12px 14px" } }}
                       >
-                        <div
-                          style={{
-                            fontFamily: "var(--f-body)",
-                            fontSize: "0.63rem",
-                            color: "var(--tx2)",
-                            marginBottom: 8,
-                          }}
-                        >
-                          {label}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "baseline",
-                            marginBottom: 6,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontFamily: "var(--f-mono)",
-                              fontWeight: 700,
-                              fontSize: "0.90rem",
-                              color: col,
-                            }}
-                          >
-                            {current} ans
-                          </span>
-                          <span
-                            style={{
-                              fontFamily: "var(--f-mono)",
-                              fontSize: "0.62rem",
-                              color: "var(--tx3)",
-                            }}
-                          >
-                            / {max} ans max
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            height: 4,
-                            borderRadius: 2,
-                            background: "var(--elev)",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: "100%",
-                              width: `${Math.min(pct, 100)}%`,
-                              background: col,
-                              borderRadius: 2,
-                            }}
-                          />
-                        </div>
-                        {over && (
-                          <div
-                            style={{
-                              fontFamily: "var(--f-disp)",
-                              fontSize: "0.54rem",
-                              fontWeight: 800,
-                              color: "var(--loss)",
-                              marginTop: 4,
-                              letterSpacing: "0.08em",
-                            }}
-                          >
-                            ⚠ LIMITE DÉPASSÉE
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                          <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.64rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--tx1)" }}>{label}</span>
+                          <div style={{ display: "flex", gap: 5 }}>
+                            {over  && <Tag color="error"   style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.50rem", letterSpacing: "0.09em" }}>LIMITE</Tag>}
+                            {!over && warn && <Tag color="warning" style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.50rem" }}>ATTENTION</Tag>}
+                            {!over && !warn && <Tag color="success" style={{ margin: 0, fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.50rem" }}>OK</Tag>}
                           </div>
-                        )}
-                      </div>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                          <span style={{ fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: "1.10rem", color: col, letterSpacing: "-0.02em" }}>{current} ans</span>
+                          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.62rem", color: "var(--tx3)" }}>/ {max} ans max</span>
+                        </div>
+                        <Progress
+                          percent={parseFloat(Math.min(pct, 100).toFixed(1))}
+                          strokeColor={col}
+                          trailColor="var(--elev)"
+                          showInfo={false}
+                          size={["100%", 5]}
+                          style={{ margin: "8px 0 0" }}
+                        />
+                      </Card>
                     );
                   })}
                 </div>

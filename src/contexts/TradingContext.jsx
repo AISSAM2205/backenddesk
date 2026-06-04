@@ -7,7 +7,8 @@
 //   /api/external/cln       ✓ → List<ExternalPnlSnapshot>
 //   /api/external/egp       ✓ → List<ExternalPnlSnapshot>
 //   /api/pnl-daily          ✓ → List<PnlDaily> (requires from + to params)
-//   /api/dashboard/rates    ✗ not implemented → rates stays null
+//   /api/dashboard/rates    ✓ → MarketRates {eurMad,usdMad,eurUsd,sofr,estr,usdEgp}
+//                               sofr/estr stockés en % (ex: 5.33) → enrichCarry divise par 100
 
 import React, {
   createContext,
@@ -33,6 +34,11 @@ function enrichCarry(rows, ratesData) {
   const sofr = n(ratesData?.sofr) || 4.3;
   const estr = n(ratesData?.estr) || 2.17;
 
+  // Remaining trading days to Dec 31 (used for EoY P&L projection)
+  const _now = new Date();
+  const _eoy = new Date(_now.getFullYear(), 11, 31);
+  const remainDaysYe = Math.max(0, Math.ceil((_eoy - _now) / 86400000));
+
   return rows.map((r) => {
     const isEur = (r.currency || "").toUpperCase() === "EUR";
     const fx = isEur ? eurMad : usdMad;
@@ -56,6 +62,9 @@ function enrichCarry(rows, ratesData) {
     const netDailyMad = cpnThetaMad - dailyFundingMad;
     const netDailyAlert = netDailyMad < 0;
 
+    // Projection P&L Éco fin d'année = P&L actuel + carry net × jours restants
+    const expectedEcoPnlYe = n(r.pnlEconomicMad) + netDailyMad * remainDaysYe;
+
     return {
       ...r,
       cpnThetaMad,
@@ -63,6 +72,7 @@ function enrichCarry(rows, ratesData) {
       fundingCostMad,
       netDailyMad,
       netDailyAlert,
+      expectedEcoPnlYe,
     };
   });
 }

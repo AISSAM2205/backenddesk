@@ -26,10 +26,10 @@ public interface PricingConfigRepository extends JpaRepository<PricingConfig, Lo
 
 
     // 2. La méthode qu'on a corrigée avec HQL pour PostgreSQL
-
     @Query("SELECT p FROM PricingConfig p WHERE p.instrument.isin = :isin AND p.configDate = :configDate")
-
     Optional<PricingConfig> findByIsinAndConfigDate(@Param("isin") String isin, @Param("configDate") LocalDate configDate);
 
+    // 3. Dernier snapshot de pricing pour un ISIN — utilisé par le PATCH /decision
+    Optional<PricingConfig> findTopByInstrumentIsinOrderByConfigDateDesc(String isin);
 }
 

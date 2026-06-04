@@ -21,6 +21,7 @@ public class RiskService {
     private final RiskMetricsRepository riskRepo;
     private final VPositionRepository   posRepo;
     private final MarketRatesRepository mrRepo;
+    private final TradeRepository       tradeRepo;
 
     public List<RiskDto> computeAllRisks(LocalDate date) {
         return posRepo.findAllActive().stream()
@@ -101,6 +102,10 @@ public class RiskService {
             nbCtr = ratio.setScale(0, RoundingMode.HALF_UP).intValue();
         }
 
+        // Position futures réelle calculée depuis la table trade
+        // (VPosition.getFuturesNetPosition() retourne toujours 0 — vue sans agrégation futures)
+        Integer currentFutPos = tradeRepo.findFuturesNetPositionByHedgeBond(pos.getIsin());
+
         return RiskDto.builder()
                 .isin(pos.getIsin()).description(pos.getDescription())
                 .netNominal(pos.getNetNominal())
@@ -110,8 +115,9 @@ public class RiskService {
                 .dv01FutureCtd(dv01Fut)
                 .hedgeRatio(ratio)
                 .nbContractsToHedge(nbCtr)
-                .currentFuturesPosition(pos.getFuturesNetPosition())
+                .currentFuturesPosition(currentFutPos != null ? currentFutPos : 0)
                 .ytmMid(rm.getYtmMid())
+                .convexity(rm.getConvexity())
                 .build();
     }
 }

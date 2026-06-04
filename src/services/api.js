@@ -54,6 +54,13 @@ const api = {
     // GET /api/pricing?date=YYYY-MM-DD → List<PricingDto>
     getAll: (date = today()) =>
       apiClient.get("/api/pricing", { params: { date } }),
+    // PATCH /api/dashboard/{isin}/decision  → { decision: "BUY"|"HOLD"|"SELL"|null }
+    updateDecision: (isin, decision) =>
+      apiClient.patch(`/api/dashboard/${encodeURIComponent(isin)}/decision`, { decision }),
+    // PATCH /api/dashboard/{isin}/target-spread → { targetSpread: 135.0 }
+    // Met à jour la cible de spread et recalcule la décision BUY/HOLD en base
+    updateTargetSpread: (isin, targetSpread) =>
+      apiClient.patch(`/api/dashboard/${encodeURIComponent(isin)}/target-spread`, { targetSpread }),
   },
   risk: {
     // GET /api/risk?date=YYYY-MM-DD → List<RiskDto>

@@ -67,6 +67,11 @@ public class RiskMetrics {
     @Column(name = "conv_factor", precision = 8, scale = 6)
     private BigDecimal convFactor;
 
+    // Convexité du bond (∂²P / ∂y² / P) — en années²
+    // Approximation : ~(D²+D)/(1+y)² pour bullet bonds
+    @Column(name = "convexity", precision = 10, scale = 4)
+    private BigDecimal convexity;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

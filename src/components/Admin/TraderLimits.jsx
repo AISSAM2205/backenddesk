@@ -1,6 +1,6 @@
 // src/components/Admin/TraderLimits.jsx
 import React, { useState } from "react";
-import { Button } from "antd";
+import { Button, Input } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import { useToast } from "../Common/Toast";
 import { Edit, Save, X, User, AlertTriangle, Shield } from "lucide-react";
@@ -352,22 +352,13 @@ const TraderLimits = () => {
                               Utilisé
                             </div>
                             {isEditing ? (
-                              <input
+                              <Input
                                 type="number"
                                 value={d.used}
                                 onChange={(e) =>
-                                  setLimitField(
-                                    inst.key,
-                                    "used",
-                                    e.target.value,
-                                  )
+                                  setLimitField(inst.key, "used", e.target.value)
                                 }
-                                className="field"
-                                style={{
-                                  padding: "5px 8px",
-                                  fontSize: "0.72rem",
-                                  marginBottom: 0,
-                                }}
+                                size="small"
                               />
                             ) : (
                               <div
@@ -387,21 +378,13 @@ const TraderLimits = () => {
                               Limite
                             </div>
                             {isEditing ? (
-                              <input
+                              <Input
                                 type="number"
                                 value={d.limit}
                                 onChange={(e) =>
-                                  setLimitField(
-                                    inst.key,
-                                    "limit",
-                                    e.target.value,
-                                  )
+                                  setLimitField(inst.key, "limit", e.target.value)
                                 }
-                                className="field"
-                                style={{
-                                  padding: "5px 8px",
-                                  fontSize: "0.72rem",
-                                }}
+                                size="small"
                               />
                             ) : (
                               <div

@@ -61,6 +61,7 @@ public class PricingService {
                 .gSpreadBid(cfg.getGSpreadBid())
                 .gSpreadAsk(cfg.getGSpreadAsk())
                 .gSpreadMid(gMid)
+                .historicalAvgSpread(cfg.getHistoricalAvgSpread())
                 .targetSpread(cfg.getTargetSpread())
                 .decision(decision)
                 .build();

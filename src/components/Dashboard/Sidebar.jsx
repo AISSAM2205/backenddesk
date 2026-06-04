@@ -33,10 +33,10 @@ const NAV_GROUPS = [
       },
       {
         id: "risk",
-        label: "Pricing & Analytics",
+        label: "Risk & Carry Analytics",
         icon: BarChart2,
         accent: "#9B3EEF",
-        sub: "Carry · DV01 · Hedge",
+        sub: "DV01 · Duration · Sensibilité",
       },
     ],
   },
@@ -478,58 +478,71 @@ const Sidebar = () => {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Monogramme AWB — pas de logo dupliqué, TopBar porte le logo */}
+          {/* Brand mark */}
           <div
             style={{
-              width: 30,
-              height: 30,
-              borderRadius: 7,
+              width: 34,
+              height: 34,
+              borderRadius: 9,
               flexShrink: 0,
-              background:
-                "linear-gradient(135deg, #B5000015 0%, #E8000020 100%)",
-              border: "1px solid rgba(229,0,0,0.22)",
+              background: "var(--surf)",
+              border: "1px solid var(--b2)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              overflow: "hidden",
             }}
           >
-            <span
-              style={{
-                fontFamily: "var(--f-disp)",
-                fontWeight: 800,
-                fontSize: "0.60rem",
-                letterSpacing: "0.04em",
-                color: "#E84040",
-              }}
-            >
-              AWB
-            </span>
+            <img
+              src="/logo-fixedincome.png"
+              alt="Fixed Income"
+              style={{ width: 24, height: 24, objectFit: "contain" }}
+            />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
                 fontFamily: "var(--f-disp)",
                 fontWeight: 700,
-                fontSize: "0.63rem",
-                letterSpacing: "0.10em",
+                fontSize: "0.62rem",
+                letterSpacing: "0.09em",
                 textTransform: "uppercase",
                 color: "var(--tx1)",
-                lineHeight: 1.3,
+                lineHeight: 1.25,
               }}
             >
               Desk International
             </div>
             <div
               style={{
-                fontFamily: "var(--f-body)",
-                fontSize: "0.57rem",
-                color: "var(--tx3)",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                marginTop: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                marginTop: 2,
               }}
             >
-              Fixed Income
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 14,
+                  height: 1,
+                  background: "linear-gradient(90deg, rgba(0,180,255,0.7) 0%, rgba(0,180,255,0) 100%)",
+                  borderRadius: 1,
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  fontFamily: "var(--f-mono)",
+                  fontSize: "0.53rem",
+                  fontWeight: 600,
+                  color: "rgba(0,180,255,0.65)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.14em",
+                }}
+              >
+                Fixed Income
+              </span>
             </div>
           </div>
         </div>

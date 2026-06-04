@@ -5,7 +5,9 @@ import React, {
   useRef,
   useMemo,
 } from "react";
-import { Button } from "antd";
+import { Button, Input, Select as AntSelect } from "antd";
+const { Option } = AntSelect;
+import * as XLSX from "xlsx";
 import api from "../../services/api";
 import {
   Search,
@@ -21,6 +23,7 @@ import {
   Upload,
   CheckCircle,
   FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -34,6 +37,13 @@ const fN = (v, d = 2) => {
   });
 };
 const fDate = (d) => (d ? new Date(d).toLocaleDateString("fr-FR") : "—");
+// Prix stockés en fraction décimale Bloomberg (1.0275 = 102.75 % du pair)
+const fPx = (v, d = 4) => {
+  if (v == null) return "—";
+  const n = parseFloat(v);
+  if (isNaN(n)) return "—";
+  return fN(n * 100, d);
+};
 const today = () => new Date().toISOString().split("T")[0];
 const pnlColor = (v) =>
   parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)";
@@ -83,6 +93,44 @@ const StatusBadge = ({ isClosed }) =>
   ) : (
     <span className="badge badge-active">Actif</span>
   );
+
+const TRADE_CAT_STYLES = {
+  TRADING: { label: "Trading", bg: "rgba(30,127,255,0.14)", color: "#60A5FA" },
+  MARKET_MAKING: {
+    label: "Mkt Mkg",
+    bg: "rgba(155,62,239,0.14)",
+    color: "#C084FC",
+  },
+  MONTAGE: {
+    label: "Montage",
+    bg: "rgba(251,146,60,0.14)",
+    color: "#FB923C",
+  },
+};
+const TradeCatBadge = ({ cat }) => {
+  const c = TRADE_CAT_STYLES[cat];
+  if (!c)
+    return (
+      <span style={{ color: "var(--tx3)", fontSize: "0.62rem" }}>—</span>
+    );
+  return (
+    <span
+      style={{
+        fontFamily: "var(--f-disp)",
+        fontSize: "0.58rem",
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        background: c.bg,
+        color: c.color,
+        borderRadius: 3,
+        padding: "2px 5px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {c.label}
+    </span>
+  );
+};
 
 /* ─── Reusable Modal Shell ───────────────────────────────────────── */
 const Modal = ({ title, onClose, children }) => (
@@ -164,22 +212,22 @@ const FieldRow = ({ label, children }) => (
   </div>
 );
 
-const Inp = (props) => (
-  <input
-    className="field"
-    style={{ fontSize: "0.82rem", padding: "8px 12px" }}
-    {...props}
-  />
-);
-const Sel = ({ children, ...props }) => (
-  <select
-    className="field"
-    style={{ fontSize: "0.82rem", padding: "8px 12px" }}
-    {...props}
-  >
-    {children}
-  </select>
-);
+const Inp = (props) => <Input {...props} />;
+
+// Wraps antd Select with a synthetic event so all existing onChange(e) => e.target.value handlers stay unchanged
+const Sel = ({ children, onChange, value, ...props }) => {
+  const options = React.Children.toArray(children)
+    .filter((c) => c && c.props)
+    .map((c) => ({ value: c.props.value, label: c.props.children }));
+  return (
+    <AntSelect
+      value={value}
+      onChange={(val) => onChange?.({ target: { value: val } })}
+      options={options}
+      style={{ width: "100%" }}
+    />
+  );
+};
 
 /* ─── CSV Upload Modal ───────────────────────────────────────────── */
 const CsvModal = ({ onClose, onSuccess }) => {
@@ -362,6 +410,7 @@ const BondModal = ({ onClose, onSuccess }) => {
     gSpread: "",
     yield: "",
     counterparty: "",
+    tradeCategory: "TRADING",
     commissionType: "CLEAN",
     tradeDate: today(),
     valueDate: today(),
@@ -383,12 +432,14 @@ const BondModal = ({ onClose, onSuccess }) => {
     setSaving(true);
     setError(null);
     try {
+      // Le trader saisit les prix en % du pair (ex: 102.75).
+      // Le backend stocke en fraction décimale (1.0275). Conversion ÷100 ici.
       await api.trades.createBond({
         ...form,
         nominal: parseFloat(form.nominal),
-        cleanPrice: parseFloat(form.cleanPrice),
-        accrued: parseFloat(form.accrued) || 0,
-        dirtyPrice: parseFloat(dirtyPrice) || 0,
+        cleanPrice: parseFloat(form.cleanPrice) / 100,
+        accrued: (parseFloat(form.accrued) || 0) / 100,
+        dirtyPrice: (parseFloat(dirtyPrice) || 0) / 100,
         gSpread: form.gSpread ? parseFloat(form.gSpread) : null,
         yield: form.yield ? parseFloat(form.yield) : null,
       });
@@ -496,6 +547,13 @@ const BondModal = ({ onClose, onSuccess }) => {
               placeholder="BNPP CIB"
               required
             />
+          </FieldRow>
+          <FieldRow label="Catégorie *">
+            <Sel value={form.tradeCategory} onChange={set("tradeCategory")}>
+              <option value="TRADING">Trading</option>
+              <option value="MARKET_MAKING">Market Making</option>
+              <option value="MONTAGE">Montage</option>
+            </Sel>
           </FieldRow>
           <FieldRow label="Commission">
             <Sel value={form.commissionType} onChange={set("commissionType")}>
@@ -878,6 +936,25 @@ const BlotterTable = () => {
     fetchTrades();
   }, [fetchTrades]);
 
+  /* Raccourcis clavier salle de marché :
+     N → Nouveau Bond    F → Nouveau Future    F5 → Refresh */
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
+      if (e.key === "F5") {
+        e.preventDefault();
+        fetchTrades();
+        return;
+      }
+      if (showBond || showFut || showCsv || cancelTrade) return;
+      if (e.key === "n" || e.key === "N") setShowBond(true);
+      if (e.key === "f" || e.key === "F") setShowFut(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fetchTrades, showBond, showFut, showCsv, cancelTrade]);
+
   const subAssets = useMemo(
     () => [...new Set(trades.map((t) => t.subAsset).filter(Boolean))],
     [trades],
@@ -926,6 +1003,87 @@ const BlotterTable = () => {
       setSortDir("desc");
     }
   };
+
+  const exportBlotterExcel = useCallback(() => {
+    const wb = XLSX.utils.book_new();
+    const ts = new Date().toISOString().slice(0, 16).replace("T", "_").replace(":", "h");
+
+    /* Helper format numérique */
+    const applyNumFmt = (ws, fmt, cols, fromRow) => {
+      const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+      for (let r = fromRow; r <= range.e.r; r++) {
+        cols.forEach((c) => {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr] && typeof ws[addr].v === "number") ws[addr].z = fmt;
+        });
+      }
+    };
+
+    const hdr = [
+      "ID", "Date Trade", "Date Valeur", "Sens", "ISIN / Ticker",
+      "Obligation", "Type", "Catégorie", "Nominal", "CCY",
+      "Prix Clean", "Prix Dirty", "Accrued", "WAP Dirty",
+      "G-Spread (bp)", "Contrepartie", "P&L Réalisé", "Statut",
+    ];
+    const rows = sorted.map((t) => [
+      t.id || "",
+      t.tradeDate || "",
+      t.valueDate || "",
+      t.way || "",
+      t.isin || t.assetIdentifier || "",
+      t.description || "",
+      t.subAsset || "",
+      t.tradeCategory || "",
+      parseFloat(t.nominal) || "",
+      t.currency || "",
+      t.cleanPrice != null ? parseFloat(t.cleanPrice) * 100 : "",
+      t.dirtyPrice != null ? parseFloat(t.dirtyPrice) * 100 : "",
+      t.accrued != null ? parseFloat(t.accrued) * 100 : "",
+      t.wapDirty != null ? parseFloat(t.wapDirty) * 100 : "",
+      parseFloat(t.gSpread) || "",
+      t.counterparty || "",
+      parseFloat(t.realizedPnl) || "",
+      t.isClosed ? "Clôturé" : "Actif",
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([hdr, ...rows]);
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+    ws["!autofilter"] = {
+      ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 0, c: hdr.length - 1 } }),
+    };
+    ws["!cols"] = [
+      { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 6 }, { wch: 16 },
+      { wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 6 },
+      { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 11 },
+      { wch: 13 }, { wch: 18 }, { wch: 16 }, { wch: 10 },
+    ];
+    applyNumFmt(ws, "#,##0",      [8],           1); // Nominal
+    applyNumFmt(ws, "#,##0.0000", [10, 11, 12, 13], 1); // Prix %
+    applyNumFmt(ws, "#,##0.0",    [14],          1); // G-Spread bp
+    applyNumFmt(ws, "#,##0",      [16],          1); // P&L Réalisé
+    XLSX.utils.book_append_sheet(wb, ws, "Trades");
+
+    // Stats sheet
+    const buys = sorted.filter((t) => t.way === "BUY" && !t.isClosed);
+    const sells = sorted.filter((t) => t.way === "SELL" && !t.isClosed);
+    const closed = sorted.filter((t) => t.isClosed);
+    const stats = [
+      ["STATISTIQUES BLOTTER", ""],
+      ["Total trades", sorted.length],
+      ["Actifs BUY", buys.length],
+      ["Actifs SELL", sells.length],
+      ["Clôturés", closed.length],
+      ["", ""],
+      ["Nominal BUY (M)", buys.reduce((s, t) => s + Math.abs(parseFloat(t.nominal || 0)), 0) / 1e6],
+      ["Nominal SELL (M)", sells.reduce((s, t) => s + Math.abs(parseFloat(t.nominal || 0)), 0) / 1e6],
+      ["P&L Réalisé Total", sorted.reduce((s, t) => s + parseFloat(t.realizedPnl || 0), 0)],
+    ];
+    const wsStats = XLSX.utils.aoa_to_sheet(stats);
+    wsStats["!cols"] = [{ wch: 24 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsStats, "Statistiques");
+
+    XLSX.writeFile(wb, `blotter_${ts}.xlsx`);
+  }, [sorted]);
 
   const Th = ({ k, label, right, center }) => (
     <th
@@ -1061,6 +1219,14 @@ const BlotterTable = () => {
             </Button>
             <Button
               size="small"
+              onClick={exportBlotterExcel}
+              icon={<FileSpreadsheet size={10} />}
+              title="Exporter le blotter en Excel (.xlsx)"
+            >
+              Excel
+            </Button>
+            <Button
+              size="small"
               loading={loading}
               onClick={fetchTrades}
               icon={<RefreshCw size={10} />}
@@ -1079,35 +1245,14 @@ const BlotterTable = () => {
             flexWrap: "wrap",
           }}
         >
-          <div style={{ position: "relative" }}>
-            <Search
-              size={11}
-              style={{
-                position: "absolute",
-                left: 9,
-                top: "50%",
-                transform: "translateY(-50%)",
-                color: "var(--tx3)",
-                pointerEvents: "none",
-              }}
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ISIN, description, contrepartie…"
-              style={{
-                background: "var(--surf)",
-                border: "1px solid var(--b1)",
-                borderRadius: 4,
-                padding: "4px 9px 4px 26px",
-                color: "var(--tx1)",
-                fontFamily: "var(--f-body)",
-                fontSize: "0.70rem",
-                outline: "none",
-                width: 210,
-              }}
-            />
-          </div>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ISIN, description, contrepartie…"
+            prefix={<Search size={11} style={{ color: "var(--tx3)" }} />}
+            size="small"
+            style={{ width: 210 }}
+          />
           {["ALL", "BUY", "SELL"].map((w) => (
             <button
               key={w}
@@ -1144,29 +1289,29 @@ const BlotterTable = () => {
               {w === "ALL" ? "Tous" : w}
             </button>
           ))}
-          <select
+          <AntSelect
             value={filterSub}
-            onChange={(e) => setSub(e.target.value)}
-            className="select"
-            style={{ borderRadius: 3, height: 24 }}
+            onChange={(v) => setSub(v)}
+            size="small"
+            style={{ width: 130 }}
+            popupMatchSelectWidth={false}
           >
-            <option value="ALL">Tous actifs</option>
+            <Option value="ALL">Tous actifs</Option>
             {subAssets.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+              <Option key={s} value={s}>{s}</Option>
             ))}
-          </select>
-          <select
+          </AntSelect>
+          <AntSelect
             value={filterStatus}
-            onChange={(e) => setStatus(e.target.value)}
-            className="select"
-            style={{ borderRadius: 3, height: 24 }}
+            onChange={(v) => setStatus(v)}
+            size="small"
+            style={{ width: 120 }}
+            popupMatchSelectWidth={false}
           >
-            <option value="ALL">Tous statuts</option>
-            <option value="ACTIF">Actifs</option>
-            <option value="ANNULE">Annulés</option>
-          </select>
+            <Option value="ALL">Tous statuts</Option>
+            <Option value="ACTIF">Actifs</Option>
+            <Option value="ANNULE">Annulés</Option>
+          </AntSelect>
         </div>
       </div>
 
@@ -1321,6 +1466,7 @@ const BlotterTable = () => {
               <Th k="assetIdentifier" label="ISIN/Ticker" />
               <Th k="description" label="Obligation" />
               <Th k="subAsset" label="Type" center />
+              <Th k="tradeCategory" label="Catég." center />
               <Th k="nominal" label="Nominal" right />
               <Th k="cleanPrice" label="Prix Clean" right />
               <Th k="dirtyPrice" label="Prix Dirty" right />
@@ -1401,6 +1547,9 @@ const BlotterTable = () => {
                   <td style={{ textAlign: "center" }}>
                     <SubBadge sub={t.subAsset} />
                   </td>
+                  <td style={{ textAlign: "center" }}>
+                    <TradeCatBadge cat={t.tradeCategory} />
+                  </td>
                   <td
                     style={{
                       textAlign: "right",
@@ -1444,7 +1593,7 @@ const BlotterTable = () => {
                       fontSize: "0.68rem",
                     }}
                   >
-                    {fN(t.cleanPrice ?? t.entryPrice, 4)}
+                    {fPx(t.cleanPrice ?? t.entryPrice)}
                   </td>
                   <td
                     style={{
@@ -1454,7 +1603,7 @@ const BlotterTable = () => {
                       color: "var(--tx2)",
                     }}
                   >
-                    {fN(t.dirtyPrice ?? t.lastPrice, 4)}
+                    {fPx(t.dirtyPrice ?? t.lastPrice)}
                   </td>
                   <td
                     style={{
@@ -1464,7 +1613,7 @@ const BlotterTable = () => {
                       color: "var(--tx3)",
                     }}
                   >
-                    {fN(t.accrued, 4)}
+                    {fPx(t.accrued)}
                   </td>
                   <td
                     style={{
@@ -1474,7 +1623,7 @@ const BlotterTable = () => {
                       color: "var(--tx2)",
                     }}
                   >
-                    {fN(t.wapDirty, 4)}
+                    {fPx(t.wapDirty)}
                   </td>
                   <td
                     style={{
@@ -1532,7 +1681,7 @@ const BlotterTable = () => {
             <tfoot>
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   style={{
                     textAlign: "left",
                     fontFamily: "var(--f-disp)",

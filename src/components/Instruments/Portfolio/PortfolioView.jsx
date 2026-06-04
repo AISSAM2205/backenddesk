@@ -5,9 +5,12 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { Button } from "antd";
+import { Button, Card, Spin, Tag, Empty, Divider, Tooltip, Progress, Alert } from "antd";
+import * as XLSX from "xlsx";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useAuth } from "../../../contexts/AuthContext";
+import { useAdmin } from "../../../contexts/AdminContext";
+import api from "../../../services/api";
 import {
   TrendingUp,
   TrendingDown,
@@ -18,6 +21,8 @@ import {
   ChevronDown,
   ChevronUp,
   Calendar,
+  FileSpreadsheet,
+  BarChart2,
 } from "lucide-react";
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -46,6 +51,13 @@ const fN = (v, d = 2) => {
     minimumFractionDigits: d,
     maximumFractionDigits: d,
   });
+};
+// Prix en fraction décimale Bloomberg (1.0275 = 102.75 % du pair) → ×100 pour affichage
+const fPx = (v, d = 4) => {
+  if (v == null) return "—";
+  const n = parseFloat(v);
+  if (isNaN(n)) return "—";
+  return fN(n * 100, d);
 };
 const fUSD = (v) => {
   if (v == null) return "—";
@@ -95,57 +107,122 @@ const useFlash = (value) => {
   return cls;
 };
 
-/* ─── KPI Card ───────────────────────────────────────────────────── */
+/* ─── KPI Card (Ant Design Card) ────────────────────────────────── */
+const KPI_ACCENT = {
+  "kpi-top-green":  "var(--profit)",
+  "kpi-top-red":    "var(--loss)",
+  "kpi-top-cyan":   "var(--cyan)",
+  "kpi-top-blue":   "#60A5FA",
+  "kpi-top-violet": "#C084FC",
+  "kpi-top-warn":   "var(--warn)",
+};
+
+/* compact=false → rangée principale (P&L, Risk) — valeur large
+   compact=true  → rangée secondaire (attribution) — valeur réduite */
 const KpiCard = ({
   label,
   value,
   sub,
-  valueColor,
+  valueColor = "var(--tx1)",
   valueClass = "",
+  topClass = "",
+  icon: Icon,
   animClass = "",
-}) => (
-  <div
-    className={`card ${animClass}`}
-    style={{ flex: "1 1 148px", padding: "8px 10px", overflow: "hidden" }}
-  >
+  compact = false,
+  statusTag,      // si fourni → remplace la valeur par un Tag Ant Design
+  tooltip,        // tooltip explicatif sur hover du label
+}) => {
+  const accent = KPI_ACCENT[topClass] || "var(--b1)";
+  const valueFontSize = compact ? "1.05rem" : "1.30rem";
+
+  const labelNode = (
     <span
-      className="lbl"
       style={{
-        display: "block",
-        marginBottom: 5,
+        fontFamily: "var(--f-disp)",
         fontSize: "0.53rem",
+        fontWeight: 700,
         letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        color: "var(--tx3)",
       }}
     >
       {label}
     </span>
-    <div
-      className={`n ${valueClass}`}
+  );
+
+  return (
+    <Card
+      size="small"
+      className={animClass}
       style={{
-        fontSize: "1.30rem",
-        fontWeight: 600,
-        lineHeight: 1,
-        color: valueColor,
-        letterSpacing: "-0.03em",
+        flex: compact ? "1 1 138px" : "1 1 155px",
+        borderTop: `2px solid ${accent}`,
+        minHeight: compact ? 72 : 84,
       }}
+      styles={{ body: { padding: compact ? "8px 11px" : "10px 14px" } }}
     >
-      {value}
-    </div>
-    {sub && (
+      {/* Header: label + icon */}
       <div
         style={{
-          marginTop: 6,
-          fontFamily: "var(--f-body)",
-          fontSize: "0.60rem",
-          color: "var(--tx3)",
-          lineHeight: 1.3,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: compact ? 3 : 5,
         }}
       >
-        {sub}
+        {tooltip ? (
+          <Tooltip title={tooltip} placement="top">
+            <span style={{ cursor: "default", borderBottom: "1px dashed var(--b2)" }}>
+              {labelNode}
+            </span>
+          </Tooltip>
+        ) : (
+          labelNode
+        )}
+        {Icon && (
+          <Icon size={12} style={{ color: accent, opacity: 0.6, flexShrink: 0 }} />
+        )}
       </div>
-    )}
-  </div>
-);
+
+      {/* Value — ou Tag de statut */}
+      {statusTag ? (
+        <div style={{ marginTop: 2 }}>{statusTag}</div>
+      ) : (
+        <div
+          className={valueClass}
+          style={{
+            fontFamily: "var(--f-mono)",
+            fontSize: valueFontSize,
+            fontWeight: 600,
+            lineHeight: 1,
+            color: valueColor,
+            letterSpacing: "-0.02em",
+          }}
+        >
+          {value}
+        </div>
+      )}
+
+      {/* Sub-label */}
+      {sub && (
+        <div
+          style={{
+            marginTop: compact ? 3 : 5,
+            fontFamily: "var(--f-body)",
+            fontSize: "0.59rem",
+            color: "var(--tx3)",
+            lineHeight: 1.3,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {sub}
+        </div>
+      )}
+    </Card>
+  );
+};
 
 /* ─── Arc Gauge (semi-circle, SVG) ──────────────────────────────── */
 const ARC_R = 36;
@@ -377,18 +454,15 @@ const PnlLineChart = ({ data }) => {
 
   if (!data || data.length < 2)
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: 190,
-          color: "var(--tx3)",
-          fontFamily: "var(--f-body)",
-          fontSize: "0.75rem",
-        }}
-      >
-        Données historiques non disponibles
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 190 }}>
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <span style={{ fontSize: "0.72rem", color: "var(--tx3)" }}>
+              Données historiques non disponibles
+            </span>
+          }
+        />
       </div>
     );
 
@@ -684,8 +758,8 @@ const PositionRow = ({ r, idx }) => {
       >
         {fMatDate(r.maturityDate)}
       </td>
-      <td style={{ color: "var(--tx2)" }}>{fN(r.lastWapDirty, 4)}</td>
-      <td>{fN(r.dirtyMarket, 4)}</td>
+      <td style={{ color: "var(--tx2)" }}>{fPx(r.lastWapDirty)}</td>
+      <td>{fPx(r.dirtyMarket)}</td>
       <td
         style={{
           color: pnlColor(parseFloat(r.perfWap || 0) * 100),
@@ -697,6 +771,16 @@ const PositionRow = ({ r, idx }) => {
       <td style={{ color: "var(--tx2)", textAlign: "right" }}>
         {r.gSpreadBid != null ? `${fN(r.gSpreadBid, 0)} bp` : "—"}
       </td>
+      <td
+        style={{
+          fontFamily: "var(--f-mono)",
+          fontSize: "0.68rem",
+          color: "var(--tx2)",
+          textAlign: "right",
+        }}
+      >
+        {r.yieldToMaturity != null ? `${fN(r.yieldToMaturity, 3)}%` : "—"}
+      </td>
       <td style={{ color: pnlColor(r.pnlEconomicMad), fontWeight: 600 }}>
         {fMAD(r.pnlEconomicMad, true)}
       </td>
@@ -704,6 +788,16 @@ const PositionRow = ({ r, idx }) => {
         {fMAD(r.netDailyMad, true)}
       </td>
       <td style={{ color: "var(--tx2)" }}>{fN(r.modifiedDuration, 2)}</td>
+      <td
+        style={{
+          fontFamily: "var(--f-mono)",
+          fontSize: "0.68rem",
+          color: "var(--tx3)",
+          textAlign: "right",
+        }}
+      >
+        {r.convexity != null ? fN(r.convexity, 2) : "—"}
+      </td>
       <td style={{ color: "#60A5FA" }}>{fN(r.dv01Bond, 0)}</td>
       <td style={{ textAlign: "center" }}>
         {r.decision === "BUY" ? (
@@ -794,7 +888,7 @@ const CatRow = ({ catKey, label, color, rows, totalPnl }) => {
           M
         </span>
       </td>
-      <td colSpan={6} />
+      <td colSpan={7} />
       <td
         style={{
           fontFamily: "var(--f-mono)",
@@ -829,7 +923,7 @@ const CatRow = ({ catKey, label, color, rows, totalPnl }) => {
       >
         {fMAD(gNet, true)}
       </td>
-      <td colSpan={3} />
+      <td colSpan={4} />
     </tr>
   );
 };
@@ -877,6 +971,13 @@ const RATES_ITEMS = [
     fmt: (v) => parseFloat(v).toFixed(3),
     fallback: "1.126",
     col: "#34D399",
+  },
+  {
+    label: "USD/EGP",
+    key: "usdEgp",
+    fmt: (v) => parseFloat(v).toFixed(2),
+    fallback: "49.93",
+    col: "#FB923C",
   },
 ];
 
@@ -1180,6 +1281,288 @@ const GSpreadWatchlist = ({ positions }) => {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Maturity Ladder (bucket analysis) ─────────────────────────── */
+const MAT_BUCKETS = [
+  { key: "0-1",  label: "0–1 an",   maxYrs: 1,   color: "#34D399" },
+  { key: "1-3",  label: "1–3 ans",  maxYrs: 3,   color: "#60A5FA" },
+  { key: "3-5",  label: "3–5 ans",  maxYrs: 5,   color: "#818CF8" },
+  { key: "5-7",  label: "5–7 ans",  maxYrs: 7,   color: "#C084FC" },
+  { key: "7-10", label: "7–10 ans", maxYrs: 10,  color: "#F472B6" },
+  { key: "10+",  label: "10+ ans",  maxYrs: Infinity, color: "#FB923C" },
+];
+
+const MaturityLadder = ({ positions, rates }) => {
+  const today = new Date();
+  const usdMad = parseFloat(rates?.usdMad || 9.251);
+
+  const buckets = useMemo(() => {
+    const acc = MAT_BUCKETS.map((b) => ({ ...b, nomUsd: 0, dv01: 0, count: 0 }));
+    (positions || []).forEach((r) => {
+      if (!r.maturityDate || !r.netNominal) return;
+      const mat = new Date(r.maturityDate);
+      if (isNaN(mat.getTime())) return;
+      const yrs = (mat - today) / (365.25 * 86400000);
+      if (yrs <= 0) return;
+      const bucket = acc.find((b, i) => {
+        const prev = i === 0 ? 0 : MAT_BUCKETS[i - 1].maxYrs;
+        return yrs > prev && yrs <= b.maxYrs;
+      });
+      if (!bucket) return;
+      bucket.nomUsd += Math.abs(parseFloat(r.netNominal || 0));
+      bucket.dv01 += parseFloat(r.dv01Bond || 0);
+      bucket.count += 1;
+    });
+    return acc.filter((b) => b.nomUsd > 0);
+  }, [positions, rates]);
+
+  if (!buckets.length) return null;
+
+  const maxNom = Math.max(...buckets.map((b) => b.nomUsd), 1);
+  const totalNom = buckets.reduce((s, b) => s + b.nomUsd, 0);
+  const totalDv01 = buckets.reduce((s, b) => s + b.dv01, 0);
+
+  // SVG bar chart dimensions
+  const W = 520, H = 120, padL = 0, padB = 28, padT = 8, barGap = 6;
+  const nBuckets = buckets.length;
+  const barW = Math.floor((W - (nBuckets - 1) * barGap) / nBuckets);
+
+  return (
+    <div className="card slide-up stagger-2" style={{ overflow: "hidden" }}>
+      <div
+        style={{
+          padding: "10px 16px",
+          borderBottom: "1px solid var(--b1)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 8,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <BarChart2 size={13} style={{ color: "var(--cyan)" }} />
+          <h3
+            style={{
+              fontFamily: "var(--f-disp)",
+              fontWeight: 700,
+              fontSize: "0.68rem",
+              letterSpacing: "0.10em",
+              textTransform: "uppercase",
+              color: "var(--tx1)",
+            }}
+          >
+            Maturity Ladder — Exposition par Maturité
+          </h3>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.66rem", color: "var(--tx3)" }}>
+            Total{" "}
+            <span style={{ color: "var(--tx1)", fontWeight: 600 }}>
+              {(totalNom / 1e6).toFixed(1)} M USD
+            </span>
+          </span>
+          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.66rem", color: "var(--tx3)" }}>
+            DV01{" "}
+            <span style={{ color: "#60A5FA", fontWeight: 600 }}>
+              {totalDv01.toLocaleString("fr-FR", { maximumFractionDigits: 0 })} $
+            </span>
+          </span>
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: "14px 20px 10px",
+          display: "flex",
+          gap: 24,
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+        }}
+      >
+        {/* SVG Bar Chart */}
+        <div style={{ flex: "1 1 300px", minWidth: 280 }}>
+          <svg
+            viewBox={`0 0 ${W} ${H + padB}`}
+            style={{ width: "100%", overflow: "visible" }}
+          >
+            {/* Y gridlines */}
+            {[0.25, 0.5, 0.75, 1].map((frac) => {
+              const y = padT + (1 - frac) * H;
+              return (
+                <g key={frac}>
+                  <line
+                    x1={0} x2={W} y1={y} y2={y}
+                    stroke="var(--chart-grid)"
+                    strokeWidth={0.8}
+                    strokeDasharray="3,5"
+                    opacity={0.6}
+                  />
+                  <text
+                    x={W + 4} y={y + 3.5}
+                    fill="var(--tx3)"
+                    fontSize={7.5}
+                    fontFamily="JetBrains Mono,monospace"
+                  >
+                    {((frac * maxNom) / 1e6).toFixed(0)}M
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Bars */}
+            {buckets.map((b, i) => {
+              const barH = Math.max(4, ((b.nomUsd / maxNom) * H));
+              const x = i * (barW + barGap);
+              const y = padT + H - barH;
+              const pct = ((b.nomUsd / totalNom) * 100).toFixed(1);
+              return (
+                <g key={b.key}>
+                  <rect
+                    x={x} y={y} width={barW} height={barH}
+                    fill={b.color}
+                    opacity={0.75}
+                    rx={3}
+                    style={{ transition: "height 0.6s ease, y 0.6s ease" }}
+                  />
+                  {/* Nominal label on top of bar */}
+                  {barH > 16 && (
+                    <text
+                      x={x + barW / 2} y={y + 12}
+                      textAnchor="middle"
+                      fill={b.color}
+                      fontSize={7.5}
+                      fontFamily="JetBrains Mono,monospace"
+                      fontWeight={700}
+                      opacity={0.95}
+                    >
+                      {(b.nomUsd / 1e6).toFixed(0)}M
+                    </text>
+                  )}
+                  {/* % label */}
+                  <text
+                    x={x + barW / 2} y={padT + H + 14}
+                    textAnchor="middle"
+                    fill="var(--tx3)"
+                    fontSize={7}
+                    fontFamily="JetBrains Mono,monospace"
+                  >
+                    {pct}%
+                  </text>
+                  {/* Bucket label */}
+                  <text
+                    x={x + barW / 2} y={padT + H + 24}
+                    textAnchor="middle"
+                    fill={b.color}
+                    fontSize={7.5}
+                    fontFamily="Syne,sans-serif"
+                    fontWeight={700}
+                    letterSpacing={0.5}
+                  >
+                    {b.label}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Baseline */}
+            <line
+              x1={0} x2={W} y1={padT + H} y2={padT + H}
+              stroke="var(--chart-axis)"
+              strokeWidth={1}
+            />
+          </svg>
+        </div>
+
+        {/* Legend table */}
+        <div style={{ flex: "0 0 auto", minWidth: 240 }}>
+          <table
+            style={{
+              borderCollapse: "collapse",
+              width: "100%",
+              fontFamily: "var(--f-mono)",
+              fontSize: "0.65rem",
+            }}
+          >
+            <thead>
+              <tr>
+                {["Bucket", "Nominal (M$)", "DV01 $", "# Pos."].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      padding: "3px 8px",
+                      borderBottom: "1px solid var(--b1)",
+                      fontFamily: "var(--f-disp)",
+                      fontSize: "0.52rem",
+                      fontWeight: 700,
+                      letterSpacing: "0.10em",
+                      textTransform: "uppercase",
+                      color: "var(--tx3)",
+                      textAlign: h === "Bucket" ? "left" : "right",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.map((b, i) => (
+                <tr
+                  key={b.key}
+                  style={{
+                    background: i % 2 === 0 ? "var(--tr-even-bg)" : "transparent",
+                  }}
+                >
+                  <td style={{ padding: "4px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: 1,
+                        background: b.color,
+                        flexShrink: 0,
+                        display: "inline-block",
+                      }}
+                    />
+                    <span style={{ color: b.color, fontWeight: 600 }}>{b.label}</span>
+                  </td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx1)", fontWeight: 600 }}>
+                    {(b.nomUsd / 1e6).toFixed(1)}
+                  </td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", color: "#60A5FA" }}>
+                    {b.dv01 > 0
+                      ? b.dv01.toLocaleString("fr-FR", { maximumFractionDigits: 0 })
+                      : "—"}
+                  </td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx3)" }}>
+                    {b.count}
+                  </td>
+                </tr>
+              ))}
+              {/* Total row */}
+              <tr style={{ borderTop: "1px solid var(--b1)" }}>
+                <td style={{ padding: "4px 8px", color: "var(--tx3)", fontSize: "0.58rem", fontFamily: "var(--f-disp)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  TOTAL
+                </td>
+                <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx1)", fontWeight: 700 }}>
+                  {(totalNom / 1e6).toFixed(1)}
+                </td>
+                <td style={{ padding: "4px 8px", textAlign: "right", color: "#60A5FA", fontWeight: 700 }}>
+                  {totalDv01.toLocaleString("fr-FR", { maximumFractionDigits: 0 })}
+                </td>
+                <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx3)", fontWeight: 700 }}>
+                  {buckets.reduce((s, b) => s + b.count, 0)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -1500,6 +1883,7 @@ const PortfolioView = () => {
     lastUpdate,
   } = useTrading();
   const { user } = useAuth();
+  const { annualTargets } = useAdmin();
 
   const [showAll, setShowAll] = useState(false);
 
@@ -1536,7 +1920,17 @@ const PortfolioView = () => {
     });
     return cats.filter((c) => c.rows.length > 0);
   }, [positions, showAll]);
-  const DESK_TARGET = 162e6;
+  // DESK_TARGET : somme des objectifs annuels depuis l'admin (limitType = "TARGET")
+  // Fallback 134M si les targets ne sont pas encore chargés (35+15+24+60 M USD seedés)
+  const DESK_TARGET = useMemo(() => {
+    if (annualTargets && annualTargets.length > 0) {
+      const total = annualTargets
+        .filter(t => t.limitType === "TARGET")
+        .reduce((s, t) => s + parseFloat(t.limitMeur || 0) * 1e6, 0);
+      return total > 0 ? total : 134e6;
+    }
+    return 134e6;
+  }, [annualTargets]);
 
   const alerts = useMemo(
     () => dashboardRows.filter((r) => r.netDailyAlert),
@@ -1595,47 +1989,231 @@ const PortfolioView = () => {
 
   const donutTotal = donutSegs.reduce((s, x) => s + x.value, 0);
 
-  /* Regulatory limit — set by admin, stored in localStorage per trader, reactive to admin changes */
-  const [limitEur, setLimitEur] = useState(() => {
-    try {
-      const stored = localStorage.getItem(`trader_limits_${user?.id}`);
-      if (stored) {
-        const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
-        if (!isNaN(val) && val > 0) return val;
-      }
-    } catch {
-      /* ignore */
-    }
-    return 280e6;
-  });
+  /* Limite réglementaire — source de vérité = backend (TraderLimit en DB)
+     Fallback 1 : localStorage (mis à jour par l'admin en temps réel)
+     Si aucune limite configurée → null (affichage "Non configurée") */
+  const [limitEur, setLimitEur] = useState(null);
 
   useEffect(() => {
-    const readLimit = () => {
-      try {
-        const stored = localStorage.getItem(`trader_limits_${user?.id}`);
-        if (stored) {
-          const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
-          if (!isNaN(val) && val > 0) {
-            setLimitEur(val);
-            return;
-          }
+    if (!user?.id) return;
+
+    // 1. Source de vérité : API backend
+    api.admin.getTraders()
+      .then((res) => {
+        const me = (res.data || []).find((t) => t.id === user.id);
+        const val = parseFloat(me?.limits?.eurobonds?.limit);
+        if (!isNaN(val) && val > 0) {
+          setLimitEur(val);
+          return;
         }
-      } catch {
-        /* ignore */
-      }
-      setLimitEur(280e6);
-    };
+        // 2. Fallback : localStorage (valeur mise en cache par l'admin)
+        const stored = localStorage.getItem(`trader_limits_${user.id}`);
+        if (stored) {
+          const cached = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
+          if (!isNaN(cached) && cached > 0) { setLimitEur(cached); return; }
+        }
+        setLimitEur(null); // Aucune limite configurée
+      })
+      .catch(() => {
+        // Offline : lire localStorage uniquement
+        try {
+          const stored = localStorage.getItem(`trader_limits_${user.id}`);
+          if (stored) {
+            const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
+            if (!isNaN(val) && val > 0) { setLimitEur(val); return; }
+          }
+        } catch { /* ignore */ }
+        setLimitEur(null);
+      });
+
+    // Réactivité aux mises à jour admin en temps réel
     const onUpdate = (e) => {
-      if (!e.detail || e.detail.traderId === user?.id) readLimit();
+      if (!e.detail || e.detail.traderId === user.id) {
+        try {
+          const stored = localStorage.getItem(`trader_limits_${user.id}`);
+          if (stored) {
+            const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
+            if (!isNaN(val) && val > 0) { setLimitEur(val); return; }
+          }
+        } catch { /* ignore */ }
+        setLimitEur(null);
+      }
     };
     window.addEventListener("traderLimitsUpdated", onUpdate);
     return () => window.removeEventListener("traderLimitsUpdated", onUpdate);
   }, [user?.id]);
 
+  /* ── Morning Report Excel export ── */
+  const exportMorningReport = useCallback(() => {
+    const wb = XLSX.utils.book_new();
+    const ts = new Date().toISOString().slice(0, 16).replace("T", "_").replace(":", "h");
+    const bd = globalDashboard?.breakdown || {};
+
+    /* Helper : applique un format numérique Excel à une plage de colonnes */
+    const applyNumFmt = (ws, fmt, cols, fromRow) => {
+      const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+      for (let r = fromRow; r <= range.e.r; r++) {
+        cols.forEach((c) => {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr] && typeof ws[addr].v === "number") {
+            ws[addr].z = fmt;
+          }
+        });
+      }
+    };
+
+    /* ── Sheet 1 : Dashboard KPIs ── */
+    const kpiData = [
+      ["MORNING REPORT — " + selectedDate, "", ""],
+      ["Généré le", new Date().toLocaleString("fr-FR"), ""],
+      ["", "", ""],
+      ["INDICATEUR", "VALEUR", "DEVISE"],
+      ["P&L Économique", pnlEco, "MAD"],
+      ["P&L Comptable", pnlAcct, "MAD"],
+      ["Net Daily (Carry)", netDaily, "MAD"],
+      ["P&L Latent", parseFloat(globalDashboard?.totalPlLatentMad || 0), "MAD"],
+      ["P&L Réalisé", parseFloat(globalDashboard?.totalPlRealizedMad || 0), "MAD"],
+      ["Coupons YTD", parseFloat(globalDashboard?.totalCouponsMad || 0), "MAD"],
+      ["Coût Financement YTD", parseFloat(globalDashboard?.totalFundingCostMad || 0), "MAD"],
+      ["Theta Coupon / jour", parseFloat(globalDashboard?.totalCpnThetaMad || 0), "MAD"],
+      ["", "", ""],
+      ["Nominal Total", nomUsd, "USD"],
+      ["Duration Modifiée", parseFloat(dur || 0), "ans"],
+      ["DV01 Portfolio", dv01, "$/bp"],
+      ["", "", ""],
+      ["PAR CLASSE", "Nominal MAD", "P&L Éco MAD"],
+      ["Eurobonds", parseFloat(bd.EUROBOND?.nominalMad || 0), parseFloat(bd.EUROBOND?.plEcoMad || 0)],
+      ["CLN", parseFloat(bd.CLN?.nominalMad || 0), parseFloat(bd.CLN?.plEcoMad || 0)],
+      ["EGP Bills", parseFloat(bd.EGP_BILL?.nominalMad || 0), parseFloat(bd.EGP_BILL?.plEcoMad || 0)],
+      ["", "", ""],
+      ["TAUX DE MARCHÉ", "VALEUR", ""],
+      ["SOFR", parseFloat(rates?.sofr || 0), "%"],
+      ["ESTR", parseFloat(rates?.estr || 0), "%"],
+      ["SOFR 10Y", parseFloat(rates?.sofr10Year || 0), "%"],
+      ["USD/MAD", parseFloat(rates?.usdMad || 0), ""],
+      ["EUR/MAD", parseFloat(rates?.eurMad || 0), ""],
+      ["EUR/USD", parseFloat(rates?.eurUsd || 0), ""],
+      ["USD/EGP", parseFloat(rates?.usdEgp || 0), ""],
+    ];
+    const wsDash = XLSX.utils.aoa_to_sheet(kpiData);
+    wsDash["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 10 }];
+    applyNumFmt(wsDash, "#,##0", [1], 4);
+    XLSX.utils.book_append_sheet(wb, wsDash, "Dashboard");
+
+    /* ── Sheet 2 : Positions détaillées ── */
+    const posHdr = [
+      "ISIN", "Obligation", "Type", "CCY",
+      "Nominal M", "Coupon %", "Échéance",
+      "WAP Dirty", "Px Marché", "Perf WAP %",
+      "G-Spd Bid", "G-Spd Mid", "Target", "Gap bp",
+      "YTM %", "Duration", "DV01 $", "Convexité",
+      "P&L Latent CCY", "P&L Réalisé CCY", "Coupons CCY",
+      "P&L Compt. MAD", "Fin. MAD", "P&L Éco MAD ★",
+      "Theta/j MAD", "Net Daily MAD ★",
+      "Hedge Future", "Nb Ctrts",
+      "Signal",
+    ];
+    const posRows = positions.map((r) => [
+      r.isin || "",
+      r.description || "",
+      r.subAsset || "",
+      r.currency || "",
+      parseFloat(r.netNominal || 0) / 1e6,
+      r.couponRate != null ? parseFloat(r.couponRate) : "",
+      r.maturityDate || "",
+      r.lastWapDirty != null ? parseFloat(r.lastWapDirty) * 100 : "",
+      r.dirtyMarket != null ? parseFloat(r.dirtyMarket) * 100 : "",
+      r.perfWap != null ? parseFloat(r.perfWap) * 100 : "",
+      parseFloat(r.gSpreadBid) || "",
+      parseFloat(r.gSpreadMid) || "",
+      parseFloat(r.targetSpread) || "",
+      r.gSpreadBid != null && r.targetSpread != null
+        ? parseFloat(r.gSpreadBid) - parseFloat(r.targetSpread)
+        : "",
+      parseFloat(r.yieldToMaturity) || "",
+      parseFloat(r.modifiedDuration) || "",
+      parseFloat(r.dv01Bond) || "",
+      parseFloat(r.convexity) || "",
+      parseFloat(r.pnlLatentCcy) || "",
+      parseFloat(r.pnlRealizedCcy) || "",
+      parseFloat(r.couponsCcy) || "",
+      parseFloat(r.pnlAccountingMad) || "",
+      parseFloat(r.fundingCostMad) || "",
+      parseFloat(r.pnlEconomicMad) || "",
+      parseFloat(r.cpnThetaMad) || "",
+      parseFloat(r.netDailyMad) || "",
+      r.hedgeFuture || "",
+      r.nbContractsToHedge || "",
+      r.decision || "",
+    ]);
+    const wsPos = XLSX.utils.aoa_to_sheet([posHdr, ...posRows]);
+    wsPos["!freeze"] = { xSplit: 0, ySplit: 1 };
+    wsPos["!autofilter"] = {
+      ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 0, c: posHdr.length - 1 } }),
+    };
+    wsPos["!cols"] = posHdr.map((h) => ({
+      wch: Math.max(h.length + 2, h.includes("Obligation") ? 30 : 13),
+    }));
+    /* Formats numériques par colonne (index base 0, ligne 1 = première donnée) */
+    applyNumFmt(wsPos, "#,##0.0",    [4],           1); // Nominal M
+    applyNumFmt(wsPos, "0.00",       [5],           1); // Coupon %
+    applyNumFmt(wsPos, "#,##0.0000", [7, 8],        1); // WAP, Px Marché (% du pair)
+    applyNumFmt(wsPos, "0.000",      [9],           1); // Perf WAP %
+    applyNumFmt(wsPos, "#,##0.0",    [10, 11, 12, 13], 1); // G-Spread bp
+    applyNumFmt(wsPos, "0.000",      [14],          1); // YTM %
+    applyNumFmt(wsPos, "#,##0.00",   [15],          1); // Duration
+    applyNumFmt(wsPos, "#,##0",      [16],          1); // DV01
+    applyNumFmt(wsPos, "#,##0.00",   [17],          1); // Convexité
+    applyNumFmt(wsPos, "#,##0",      [18, 19, 20, 21, 22, 23, 24, 25], 1); // P&L MAD
+    XLSX.utils.book_append_sheet(wb, wsPos, "Positions");
+
+    /* ── Sheet 3 : Maturity Ladder ── */
+    const today2 = new Date();
+    const ladderBuckets = [
+      { label: "0–1 an",   minYrs: 0,  maxYrs: 1 },
+      { label: "1–3 ans",  minYrs: 1,  maxYrs: 3 },
+      { label: "3–5 ans",  minYrs: 3,  maxYrs: 5 },
+      { label: "5–7 ans",  minYrs: 5,  maxYrs: 7 },
+      { label: "7–10 ans", minYrs: 7,  maxYrs: 10 },
+      { label: "10+ ans",  minYrs: 10, maxYrs: Infinity },
+    ];
+    const ladderAcc = ladderBuckets.map((b) => ({ ...b, nomUsd: 0, dv01: 0, count: 0 }));
+    positions.forEach((r) => {
+      if (!r.maturityDate || !r.netNominal) return;
+      const mat = new Date(r.maturityDate);
+      if (isNaN(mat.getTime())) return;
+      const yrs = (mat - today2) / (365.25 * 86400000);
+      if (yrs <= 0) return;
+      const bkt = ladderAcc.find((b) => yrs > b.minYrs && yrs <= b.maxYrs);
+      if (!bkt) return;
+      bkt.nomUsd += Math.abs(parseFloat(r.netNominal || 0));
+      bkt.dv01 += parseFloat(r.dv01Bond || 0);
+      bkt.count += 1;
+    });
+    const ladderData = [
+      ["Bucket", "Nominal (M USD)", "DV01 ($)", "# Positions"],
+      ...ladderAcc.map((b) => [b.label, b.nomUsd / 1e6, b.dv01, b.count]),
+      ["TOTAL",
+        ladderAcc.reduce((s, b) => s + b.nomUsd, 0) / 1e6,
+        ladderAcc.reduce((s, b) => s + b.dv01, 0),
+        ladderAcc.reduce((s, b) => s + b.count, 0),
+      ],
+    ];
+    const wsLadder = XLSX.utils.aoa_to_sheet(ladderData);
+    wsLadder["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsLadder, "Maturity Ladder");
+
+    XLSX.writeFile(wb, `morning_report_${selectedDate}_${ts}.xlsx`);
+  }, [globalDashboard, positions, dashboardRows, rates, pnlEco, pnlAcct, netDaily,
+      nomUsd, dur, dv01, selectedDate]);
+
   const exposureEur =
     nomUsd * ((rates?.eurMad || 10.72) / (rates?.usdMad || 9.251));
-  const limitPct = Math.min((exposureEur / limitEur) * 100, 110);
-  const limitOver = limitPct > 100;
+  const limitPct = limitEur != null && limitEur > 0
+    ? Math.min((exposureEur / limitEur) * 100, 110)
+    : 0;
+  const limitOver = limitEur != null && limitPct > 100;
+  const limitConfigured = limitEur != null && limitEur > 0;
 
   return (
     <div style={{ flex: 1, overflowY: "auto", background: "var(--void)" }}>
@@ -1655,25 +2233,12 @@ const PortfolioView = () => {
                 }}
               />
               <h2 className="view-title">Dashboard Global</h2>
-              <div
-                className={`badge ${connectionStatus === "connected" ? "badge-live" : "badge-closed"}`}
-                style={{ marginLeft: 2 }}
+              <Tag
+                color={connectionStatus === "connected" ? "success" : "error"}
+                style={{ marginLeft: 2, fontSize: "0.60rem" }}
               >
-                {connectionStatus === "connected" ? (
-                  <>
-                    <span
-                      className="live-dot"
-                      style={{ width: 4, height: 4 }}
-                    />
-                    Live
-                  </>
-                ) : (
-                  <>
-                    <WifiOff size={9} />
-                    Offline
-                  </>
-                )}
-              </div>
+                {connectionStatus === "connected" ? "● Live" : "⊗ Offline"}
+              </Tag>
             </div>
             <p className="view-sub" style={{ paddingLeft: 9 }}>
               Fixed Income · Desk International
@@ -1686,6 +2251,14 @@ const PortfolioView = () => {
               {lastUpdate.toLocaleTimeString("fr-FR")}
             </span>
           )}
+          <Button
+            size="small"
+            onClick={exportMorningReport}
+            icon={<FileSpreadsheet size={10} />}
+            title="Exporter Morning Report Excel (.xlsx) — Dashboard + Positions + Maturity Ladder"
+          >
+            Morning Report
+          </Button>
           <Button
             size="small"
             loading={loading}
@@ -1704,35 +2277,12 @@ const PortfolioView = () => {
         <div
           style={{
             display: "flex",
-            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
             height: 300,
-            gap: 16,
           }}
         >
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              border: "2px solid var(--b1)",
-              borderTopColor: "var(--cyan)",
-              borderRadius: "50%",
-              animation: "spin 1s linear infinite",
-            }}
-          />
-          <p
-            style={{
-              fontFamily: "var(--f-disp)",
-              fontSize: "0.65rem",
-              fontWeight: 700,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "var(--tx3)",
-            }}
-          >
-            Chargement des positions…
-          </p>
+          <Spin size="large" tip="Chargement des positions…" />
         </div>
       ) : (
         <div
@@ -1743,133 +2293,347 @@ const PortfolioView = () => {
             gap: 16,
           }}
         >
-          {/* ── KPI Row ── */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <KpiCard
-              label="P&L Économique"
-              value={fMAD(pnlEco, true)}
-              sub={`${Object.keys(globalDashboard?.breakdown || {}).length} classes d'actifs`}
-              topClass={pnlPos ? "kpi-top-green" : "kpi-top-red"}
-              valueColor={pnlPos ? "var(--profit)" : "var(--loss)"}
-              valueClass={pnlPos ? "glow-profit" : "glow-loss"}
-              icon={pnlPos ? TrendingUp : TrendingDown}
-              animClass="slide-up stagger-1"
-            />
-            <KpiCard
-              label="P&L Comptable"
-              value={fMAD(pnlAcct, true)}
-              sub="Accounting PnL"
-              topClass={pnlAcct >= 0 ? "kpi-top-green" : "kpi-top-red"}
-              valueColor={pnlAcct >= 0 ? "var(--profit)" : "var(--loss)"}
-              icon={Activity}
-              animClass="slide-up stagger-2"
-            />
-            <KpiCard
-              label="Net Daily (Carry)"
-              value={fMAD(netDaily, true)}
-              sub="Theta + Financement"
-              topClass={netDaily >= 0 ? "kpi-top-cyan" : "kpi-top-red"}
-              valueColor={netDaily >= 0 ? "var(--cyan)" : "var(--loss)"}
-              icon={Activity}
-              animClass="slide-up stagger-3"
-            />
-            <KpiCard
-              label="Nominal Total (USD)"
-              value={fUSD(nomUsd)}
-              sub={`${eurobonds.length} obligations`}
-              topClass="kpi-top-blue"
-              valueColor="var(--tx1)"
-              animClass="slide-up stagger-4"
-            />
-            <KpiCard
-              label="Duration Modifiée"
-              value={dur != null ? `${fN(dur, 4)} ans` : "—"}
-              sub="Nominal-weighted"
-              topClass="kpi-top-violet"
-              valueColor="#C084FC"
-              animClass="slide-up stagger-5"
-            />
-            <KpiCard
-              label="DV01 Portfolio"
-              value={`${fN(dv01, 0)} USD/bp`}
-              sub="Sensibilité 1bp"
-              topClass="kpi-top-blue"
-              valueColor="#60A5FA"
-              animClass="slide-up stagger-6"
-            />
+          {/* ── Rangée 1 : Métriques principales ── */}
+          <div>
+            <Divider orientation="left" style={{ margin: "0 0 10px", fontSize: "0.55rem", color: "var(--tx3)", borderColor: "var(--b1)", textTransform: "uppercase", letterSpacing: "0.10em" }}>
+              Synthèse Performance
+            </Divider>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <KpiCard
+                label="P&L Économique"
+                value={fMAD(pnlEco, true)}
+                sub={`${Object.keys(globalDashboard?.breakdown || {}).length} classes d'actifs`}
+                topClass={pnlPos ? "kpi-top-green" : "kpi-top-red"}
+                valueColor={pnlPos ? "var(--profit)" : "var(--loss)"}
+                valueClass=""
+                icon={pnlPos ? TrendingUp : TrendingDown}
+                animClass="slide-up stagger-1"
+                tooltip="P&L total économique = Latent + Réalisé + Coupons − Financement, converti en MAD"
+              />
+              <KpiCard
+                label="P&L Comptable"
+                value={fMAD(pnlAcct, true)}
+                sub="Latent + Réalisé + Coupons"
+                topClass={pnlAcct >= 0 ? "kpi-top-green" : "kpi-top-red"}
+                valueColor={pnlAcct >= 0 ? "var(--profit)" : "var(--loss)"}
+                icon={Activity}
+                animClass="slide-up stagger-2"
+                tooltip="P&L comptable avant déduction du coût de financement"
+              />
+              <KpiCard
+                label="Net Daily ★"
+                value={fMAD(netDaily, true)}
+                sub="Theta Coupon − Financement/j"
+                topClass={netDaily >= 0 ? "kpi-top-cyan" : "kpi-top-red"}
+                valueColor={netDaily >= 0 ? "var(--cyan)" : "var(--loss)"}
+                icon={Activity}
+                animClass="slide-up stagger-3"
+                tooltip="Revenu net quotidien : accrual coupon moins coût repo. Positif = carry positif."
+              />
+              <KpiCard
+                label="Nominal Total"
+                value={fUSD(nomUsd)}
+                sub={`${eurobonds.length} obligations actives`}
+                topClass="kpi-top-blue"
+                valueColor="var(--tx1)"
+                animClass="slide-up stagger-4"
+                tooltip="Exposition nominale totale du book en USD"
+              />
+              <KpiCard
+                label="Duration Modifiée"
+                value={dur != null ? `${fN(dur, 4)} ans` : "—"}
+                sub="Moyenne pondérée par nominal"
+                topClass="kpi-top-blue"
+                valueColor="#60A5FA"
+                animClass="slide-up stagger-5"
+                tooltip="Sensibilité en prix à une variation de 1% des taux. Plus c'est élevé, plus le book est sensible."
+              />
+              <KpiCard
+                label="DV01 Portfolio"
+                value={`${fN(dv01, 0)} $/bp`}
+                sub="Perte si taux +1bp"
+                topClass="kpi-top-blue"
+                valueColor="#60A5FA"
+                animClass="slide-up stagger-6"
+                tooltip="Dollar Value of 1 Basis Point — perte en USD si les taux montent de 0.01%"
+              />
+            </div>
           </div>
 
-          {/* ── KPI Row 2 — Attribution P&L ── */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <KpiCard
-              label="P&L Latent"
-              value={fMAD(globalDashboard?.totalPlLatentMad, true)}
-              sub="Mark-to-Market non réalisé"
-              topClass={
-                parseFloat(globalDashboard?.totalPlLatentMad || 0) >= 0
-                  ? "kpi-top-green"
-                  : "kpi-top-red"
-              }
-              valueColor={pnlColor(globalDashboard?.totalPlLatentMad)}
-              animClass="slide-up stagger-1"
-            />
-            <KpiCard
-              label="P&L Réalisé"
-              value={fMAD(globalDashboard?.totalPlRealizedMad, true)}
-              sub="Cessions &amp; clôtures"
-              topClass={
-                parseFloat(globalDashboard?.totalPlRealizedMad || 0) >= 0
-                  ? "kpi-top-green"
-                  : "kpi-top-red"
-              }
-              valueColor={pnlColor(globalDashboard?.totalPlRealizedMad)}
-              animClass="slide-up stagger-2"
-            />
-            <KpiCard
-              label="Coupons / CCY"
-              value={fMAD(globalDashboard?.totalCouponsMad, true)}
-              sub="Intérêts courus YTD"
-              topClass="kpi-top-cyan"
-              valueColor="var(--cyan)"
-              animClass="slide-up stagger-3"
-            />
-            <KpiCard
-              label="Coût Financement"
-              value={fMAD(globalDashboard?.totalFundingCostMad, true)}
-              sub="Repo &amp; carry cost"
-              topClass={
-                parseFloat(globalDashboard?.totalFundingCostMad || 0) >= 0
-                  ? "kpi-top-green"
-                  : "kpi-top-red"
-              }
-              valueColor={pnlColor(globalDashboard?.totalFundingCostMad)}
-              animClass="slide-up stagger-4"
-            />
-            <KpiCard
-              label="Theta Coupon / j"
-              value={fMAD(globalDashboard?.totalCpnThetaMad, true)}
-              sub="Accrual journalier"
-              topClass="kpi-top-violet"
-              valueColor="#C084FC"
-              animClass="slide-up stagger-5"
-            />
-            <KpiCard
-              label="Alertes Carry"
-              value={alerts.length > 0 ? `${alerts.length} pos.` : "✓ OK"}
-              sub={
-                alerts.length > 0
-                  ? alerts
-                      .slice(0, 2)
-                      .map((a) => a.description || a.isin)
-                      .join(" · ")
-                  : "Aucune position négative"
-              }
-              topClass={alerts.length > 0 ? "kpi-top-red" : "kpi-top-green"}
-              valueColor={alerts.length > 0 ? "var(--loss)" : "var(--profit)"}
-              icon={AlertTriangle}
-              animClass="slide-up stagger-6"
-            />
+          {/* ── Rangée 2 : Attribution P&L (compact) ── */}
+          <div>
+            <Divider orientation="left" style={{ margin: "0 0 10px", fontSize: "0.55rem", color: "var(--tx3)", borderColor: "var(--b1)", textTransform: "uppercase", letterSpacing: "0.10em" }}>
+              Attribution P&amp;L
+            </Divider>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <KpiCard
+                label="P&L Latent"
+                value={fMAD(globalDashboard?.totalPlLatentMad, true)}
+                sub="Mark-to-Market non réalisé"
+                topClass={parseFloat(globalDashboard?.totalPlLatentMad || 0) >= 0 ? "kpi-top-green" : "kpi-top-red"}
+                valueColor={pnlColor(globalDashboard?.totalPlLatentMad)}
+                animClass="slide-up stagger-1"
+                compact
+              />
+              <KpiCard
+                label="P&L Réalisé"
+                value={fMAD(globalDashboard?.totalPlRealizedMad, true)}
+                sub="Cessions & clôtures"
+                topClass={parseFloat(globalDashboard?.totalPlRealizedMad || 0) >= 0 ? "kpi-top-green" : "kpi-top-red"}
+                valueColor={pnlColor(globalDashboard?.totalPlRealizedMad)}
+                animClass="slide-up stagger-2"
+                compact
+              />
+              <KpiCard
+                label="Coupons / CCY"
+                value={fMAD(globalDashboard?.totalCouponsMad, true)}
+                sub="Intérêts courus YTD"
+                topClass="kpi-top-cyan"
+                valueColor="var(--cyan)"
+                animClass="slide-up stagger-3"
+                compact
+              />
+              <KpiCard
+                label="Coût Financement"
+                value={fMAD(globalDashboard?.totalFundingCostMad, true)}
+                sub="Repo SOFR/ESTR × nominal"
+                topClass="kpi-top-warn"
+                valueColor="var(--warn)"
+                animClass="slide-up stagger-4"
+                compact
+                tooltip="Coût de financement cumulé YTD. Toujours affiché en orange — c'est une dépense."
+              />
+              <KpiCard
+                label="Theta Coupon / j"
+                value={fMAD(globalDashboard?.totalCpnThetaMad, true)}
+                sub="Accrual journalier"
+                topClass="kpi-top-cyan"
+                valueColor="var(--cyan)"
+                animClass="slide-up stagger-5"
+                compact
+              />
+              <KpiCard
+                label="Alertes Carry"
+                sub={alerts.length > 0 ? alerts.slice(0, 2).map((a) => a.description || a.isin).join(" · ") : "Aucune position négative"}
+                topClass={alerts.length > 0 ? "kpi-top-red" : "kpi-top-green"}
+                icon={AlertTriangle}
+                animClass="slide-up stagger-6"
+                compact
+                statusTag={
+                  alerts.length > 0 ? (
+                    <Tag color="error" style={{ fontSize: "0.72rem", fontWeight: 600 }}>
+                      ⚠ {alerts.length} pos. négative{alerts.length > 1 ? "s" : ""}
+                    </Tag>
+                  ) : (
+                    <Tag color="success" style={{ fontSize: "0.72rem", fontWeight: 600 }}>
+                      ✓ OK
+                    </Tag>
+                  )
+                }
+              />
+            </div>
           </div>
+
+          {/* ── P&L Bridge — Réconciliation composants ── */}
+          {pnlEco !== 0 && globalDashboard && (() => {
+            const latent   = parseFloat(globalDashboard.totalPlLatentMad   || 0);
+            const realized = parseFloat(globalDashboard.totalPlRealizedMad || 0);
+            const coupons  = parseFloat(globalDashboard.totalCouponsMad    || 0);
+            const funding  = parseFloat(globalDashboard.totalFundingCostMad || 0);
+            const computed = latent + realized + coupons - funding;
+            const residual = pnlEco - computed;
+            const isBalanced = Math.abs(residual) < Math.max(Math.abs(pnlEco) * 0.005, 10000);
+            const items = [
+              { label: "MTM Latent",   val: latent,   color: latent   >= 0 ? "var(--profit)" : "var(--loss)" },
+              { label: "P&L Réalisé",  val: realized,  color: realized >= 0 ? "var(--profit)" : "var(--loss)" },
+              { label: "Coupons YTD",  val: coupons,   color: "var(--cyan)" },
+              { label: "Financement",  val: -funding,  color: "var(--warn)" },
+            ];
+            const maxAbs = Math.max(...items.map((x) => Math.abs(x.val)), 1);
+            return (
+              <div
+                className="card"
+                style={{
+                  padding: "10px 16px 12px",
+                  borderLeft: "3px solid var(--cyan)",
+                  background: "linear-gradient(90deg, rgba(0,202,255,0.03) 0%, transparent 60%)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 10,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--f-disp)",
+                      fontWeight: 700,
+                      fontSize: "0.55rem",
+                      letterSpacing: "0.12em",
+                      textTransform: "uppercase",
+                      color: "var(--tx3)",
+                    }}
+                  >
+                    P&amp;L Bridge — Réconciliation
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--f-mono)",
+                      fontSize: "0.60rem",
+                      fontWeight: 600,
+                      color: isBalanced ? "var(--profit)" : "var(--warn)",
+                      padding: "1px 6px",
+                      borderRadius: 3,
+                      background: isBalanced ? "rgba(0,232,153,0.08)" : "rgba(245,158,11,0.08)",
+                      border: `1px solid ${isBalanced ? "rgba(0,232,153,0.20)" : "rgba(245,158,11,0.20)"}`,
+                    }}
+                  >
+                    {isBalanced ? "✓ Balancé" : `Δ ${fMAD(residual, true)}`}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {items.map((item) => {
+                    const barPct = (Math.abs(item.val) / maxAbs) * 100;
+                    const pos = item.val >= 0;
+                    return (
+                      <div
+                        key={item.label}
+                        style={{ display: "flex", alignItems: "center", gap: 10 }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "var(--f-disp)",
+                            fontSize: "0.52rem",
+                            fontWeight: 700,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: "var(--tx3)",
+                            minWidth: 106,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {pos ? "+" : "−"} {item.label}
+                        </span>
+                        <div
+                          style={{
+                            flex: 1,
+                            height: 5,
+                            background: "var(--elev)",
+                            borderRadius: 3,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: "100%",
+                              width: `${barPct}%`,
+                              background: item.color,
+                              borderRadius: 3,
+                              opacity: 0.65,
+                              transition: "width 0.7s ease",
+                            }}
+                          />
+                        </div>
+                        <span
+                          style={{
+                            fontFamily: "var(--f-mono)",
+                            fontSize: "0.72rem",
+                            fontWeight: 600,
+                            color: item.color,
+                            minWidth: 84,
+                            textAlign: "right",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {fMAD(item.val, true)}
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Résidu FX si non balancé */}
+                  {!isBalanced && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span
+                        style={{
+                          fontFamily: "var(--f-disp)",
+                          fontSize: "0.52rem",
+                          fontWeight: 700,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: "var(--warn)",
+                          minWidth: 106,
+                          flexShrink: 0,
+                        }}
+                      >
+                        ≈ Impact FX
+                      </span>
+                      <div style={{ flex: 1 }} />
+                      <span
+                        style={{
+                          fontFamily: "var(--f-mono)",
+                          fontSize: "0.72rem",
+                          fontWeight: 600,
+                          color: "var(--warn)",
+                          minWidth: 84,
+                          textAlign: "right",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {fMAD(residual, true)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Ligne totale */}
+                  <div
+                    style={{
+                      borderTop: "1px solid var(--b1)",
+                      marginTop: 2,
+                      paddingTop: 7,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--f-disp)",
+                        fontSize: "0.54rem",
+                        fontWeight: 700,
+                        letterSpacing: "0.10em",
+                        textTransform: "uppercase",
+                        color: "var(--tx1)",
+                        minWidth: 106,
+                        flexShrink: 0,
+                      }}
+                    >
+                      = P&amp;L Économique
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <span
+                      style={{
+                        fontFamily: "var(--f-mono)",
+                        fontSize: "0.90rem",
+                        fontWeight: 700,
+                        color: pnlEco >= 0 ? "var(--profit)" : "var(--loss)",
+                        minWidth: 84,
+                        textAlign: "right",
+                        flexShrink: 0,
+                        letterSpacing: "-0.02em",
+                      }}
+                    >
+                      {fMAD(pnlEco, true)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Forecast 31 Déc ── */}
           {pnlEco !== 0 &&
@@ -2227,6 +2991,9 @@ const PortfolioView = () => {
               );
             })()}
 
+          {/* ── Maturity Ladder ── */}
+          <MaturityLadder positions={positions} rates={rates} />
+
           {/* ── G-Spread Watchlist ── */}
           <GSpreadWatchlist positions={positions} />
 
@@ -2386,26 +3153,36 @@ const PortfolioView = () => {
                   }}
                 >
                   <span className="lbl">Limite Réglementaire</span>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-mono)",
-                      fontSize: "0.68rem",
-                      color: limitOver ? "var(--loss)" : "var(--profit)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {fUSD(exposureEur / 1e6)}M / {fUSD(limitEur / 1e6)}M EUR
-                  </span>
+                  {limitConfigured ? (
+                    <span
+                      style={{
+                        fontFamily: "var(--f-mono)",
+                        fontSize: "0.68rem",
+                        color: limitOver ? "var(--loss)" : "var(--profit)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {fUSD(exposureEur / 1e6)}M / {fUSD(limitEur / 1e6)}M EUR
+                    </span>
+                  ) : (
+                    <Tag color="warning" style={{ fontSize: "0.60rem" }}>
+                      Non configurée
+                    </Tag>
+                  )}
                 </div>
-                <div className="progress-track">
-                  <div
-                    className="progress-fill"
-                    style={{
-                      width: `${Math.min(limitPct, 100)}%`,
-                      background: limitOver ? "var(--loss)" : "var(--profit)",
-                    }}
-                  />
-                </div>
+                {limitConfigured ? (
+                  <div className="progress-track">
+                    <div
+                      className="progress-fill"
+                      style={{
+                        width: `${Math.min(limitPct, 100)}%`,
+                        background: limitOver ? "var(--loss)" : "var(--profit)",
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="progress-track" />
+                )}
               </div>
 
               {/* P&L Attribution by asset class */}
@@ -2551,155 +3328,98 @@ const PortfolioView = () => {
               }}
             >
               {/* Header */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <p className="sect-ttl">Métriques de Risque</p>
-                <span
-                  style={{
-                    fontFamily: "var(--f-mono)",
-                    fontSize: "0.55rem",
-                    color: "var(--tx3)",
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                  }}
-                >
+                <Tag style={{ fontFamily: "var(--f-mono)", fontSize: "0.58rem" }}>
                   Util. / Limite
-                </span>
+                </Tag>
               </div>
 
-              {/* 3 gauge tiles */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  gap: 6,
-                }}
-              >
-                <div
-                  style={{
-                    background: "var(--surf)",
-                    border: "1px solid var(--b1)",
-                    borderRadius: 10,
-                    padding: "10px 6px 6px",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: "50%",
-                      background: "#C084FC",
-                      boxShadow: "0 0 7px #C084FC",
-                      marginBottom: 4,
-                    }}
-                  />
-                  <ArcGauge
-                    value={parseFloat(dur || 0)}
-                    max={12}
-                    color="#C084FC"
-                    label="Duration"
-                    valueStr={dur != null ? `${fN(dur, 2)}y` : "—"}
-                  />
-                </div>
+              {/* 3 gauges Ant Design Progress */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
 
-                <div
-                  style={{
-                    background: "var(--surf)",
-                    border: "1px solid var(--b1)",
-                    borderRadius: 10,
-                    padding: "10px 6px 6px",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: "50%",
-                      background: "#60A5FA",
-                      boxShadow: "0 0 7px #60A5FA",
-                      marginBottom: 4,
-                    }}
+                {/* Duration */}
+                <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
+                  <Progress
+                    type="dashboard"
+                    size={82}
+                    percent={dur != null ? Math.min(Math.round((parseFloat(dur) / 12) * 100), 100) : 0}
+                    strokeColor="#60A5FA"
+                    trailColor="rgba(96,165,250,0.10)"
+                    format={() => (
+                      <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: "#60A5FA" }}>
+                        {dur != null ? `${fN(dur, 2)}y` : "—"}
+                      </span>
+                    )}
                   />
-                  <ArcGauge
-                    value={dv01}
-                    max={50000}
-                    color="#60A5FA"
-                    label="DV01 k$"
-                    valueStr={`${fN(dv01 / 1000, 1)}k`}
-                  />
-                </div>
+                  <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
+                    Duration
+                  </div>
+                </Card>
 
-                <div
-                  style={{
-                    background: "var(--surf)",
-                    border: `1px solid ${limitOver ? "rgba(255,43,96,0.30)" : "var(--b1)"}`,
-                    borderRadius: 10,
-                    padding: "10px 6px 6px",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                  }}
+                {/* DV01 */}
+                <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
+                  <Progress
+                    type="dashboard"
+                    size={82}
+                    percent={Math.min(Math.round((dv01 / 50000) * 100), 100)}
+                    strokeColor="#60A5FA"
+                    trailColor="rgba(96,165,250,0.10)"
+                    format={() => (
+                      <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: "#60A5FA" }}>
+                        {fN(dv01 / 1000, 1)}k
+                      </span>
+                    )}
+                  />
+                  <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
+                    DV01 $/bp
+                  </div>
+                </Card>
+
+                {/* Expo / Limite */}
+                <Card
+                  size="small"
+                  style={limitOver ? { borderColor: "rgba(255,43,96,0.35)" } : {}}
+                  styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}
                 >
-                  <div
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: "50%",
-                      background: limitOver ? "var(--loss)" : "var(--profit)",
-                      boxShadow: limitOver
-                        ? "0 0 7px var(--loss)"
-                        : "0 0 7px var(--profit)",
-                      marginBottom: 4,
-                    }}
+                  <Progress
+                    type="dashboard"
+                    size={82}
+                    percent={limitConfigured ? Math.min(Math.round(limitPct), 100) : 0}
+                    strokeColor={
+                      !limitConfigured ? "var(--tx3)"
+                      : limitOver       ? "var(--loss)"
+                      :                   "var(--profit)"
+                    }
+                    trailColor="rgba(255,255,255,0.06)"
+                    format={() => (
+                      <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: !limitConfigured ? "var(--tx3)" : limitOver ? "var(--loss)" : "var(--profit)" }}>
+                        {limitConfigured ? `${Math.round(limitPct)}%` : "—"}
+                      </span>
+                    )}
                   />
-                  <ArcGauge
-                    value={exposureEur}
-                    max={limitEur}
-                    color={limitOver ? "var(--loss)" : "var(--profit)"}
-                    label="Expo / Lim."
-                    valueStr={`${Math.round(limitPct)}%`}
-                  />
-                </div>
+                  <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
+                    Expo / Lim.
+                  </div>
+                </Card>
               </div>
 
-              {/* Carry alerts */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  background:
-                    alerts.length > 0
-                      ? "rgba(255,43,96,0.06)"
-                      : "rgba(0,232,153,0.05)",
-                  border: `1px solid ${alerts.length > 0 ? "rgba(255,43,96,0.22)" : "rgba(0,232,153,0.18)"}`,
-                }}
-              >
-                <span className="lbl">Alertes Carry</span>
-                <span
-                  style={{
-                    fontFamily: "var(--f-mono)",
-                    fontSize: "0.72rem",
-                    fontWeight: 700,
-                    color: alerts.length > 0 ? "var(--loss)" : "var(--profit)",
-                  }}
-                >
-                  {alerts.length > 0 ? `⚠ ${alerts.length} pos.` : "✓ OK"}
-                </span>
-              </div>
+              {/* Alertes Carry — Ant Design Alert */}
+              {alerts.length > 0 ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={`${alerts.length} position${alerts.length > 1 ? "s" : ""} · Carry négatif`}
+                  style={{ fontSize: "0.68rem", padding: "6px 10px" }}
+                />
+              ) : (
+                <Alert
+                  type="success"
+                  showIcon
+                  message="Alertes Carry — Aucune position négative"
+                  style={{ fontSize: "0.68rem", padding: "6px 10px" }}
+                />
+              )}
             </div>
           </div>
 
@@ -2841,9 +3561,11 @@ const PortfolioView = () => {
                       "Prix Mkt",
                       "Perf WAP",
                       "G-Spread",
+                      "YTM",
                       "P&L Éco",
                       "Net Daily",
                       "Dur.",
+                      "Convexité",
                       "DV01 $",
                       "Signal",
                     ].map((h, i) => (
@@ -2851,7 +3573,7 @@ const PortfolioView = () => {
                         key={h}
                         style={{
                           textAlign:
-                            i === 14
+                            i === 16
                               ? "center"
                               : i >= 3
                                 ? "right"
@@ -2920,6 +3642,7 @@ const PortfolioView = () => {
                       </td>
                       <td colSpan={5} />
                       <td />
+                      <td />
                       <td style={{ color: pnlColor(pnlEco), fontWeight: 700 }}>
                         {fMAD(pnlEco, true)}
                       </td>
@@ -2928,6 +3651,7 @@ const PortfolioView = () => {
                       >
                         {fMAD(netDaily, true)}
                       </td>
+                      <td />
                       <td />
                       <td style={{ color: "#60A5FA" }}>{fN(dv01, 0)}</td>
                       <td />

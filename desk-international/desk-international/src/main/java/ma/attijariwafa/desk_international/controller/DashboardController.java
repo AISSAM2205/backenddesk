@@ -9,14 +9,17 @@ import ma.attijariwafa.desk_international.entity.MarketRates;
 import ma.attijariwafa.desk_international.entity.PnlDaily;
 import ma.attijariwafa.desk_international.repository.MarketRatesRepository;
 import ma.attijariwafa.desk_international.repository.PnlDailyRepository;
+import ma.attijariwafa.desk_international.repository.PricingConfigRepository;
 import ma.attijariwafa.desk_international.service.DashboardService;
 import ma.attijariwafa.desk_international.service.GlobalDashboardService;
 import ma.attijariwafa.desk_international.service.PnlService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
@@ -28,6 +31,7 @@ public class DashboardController {
     private final PnlDailyRepository     pnlDailyRepo;
     private final GlobalDashboardService globalDashService;
     private final MarketRatesRepository  marketRatesRepo;
+    private final PricingConfigRepository pricingConfigRepo;
 
     // ─── URL PRINCIPALE ──────────────────────────────────────────
     // GET /api/dashboard/global?date=2025-05-20
@@ -85,6 +89,53 @@ public class DashboardController {
             rates = marketRatesRepo.findTopByOrderByRateDateDesc().orElse(null);
         }
         return rates != null ? ResponseEntity.ok(rates) : ResponseEntity.notFound().build();
+    }
+
+    // PATCH /api/dashboard/{isin}/decision
+    // Body : { "decision": "BUY" | "HOLD" | "SELL" | null }
+    // Met à jour le signal du dernier snapshot PricingConfig pour cet ISIN
+    @PatchMapping("/dashboard/{isin}/decision")
+    public ResponseEntity<Void> updateDecision(
+            @PathVariable String isin,
+            @RequestBody Map<String, String> body) {
+        String raw = body.get("decision");
+        // null ou chaîne vide = effacer le signal
+        String newDecision = (raw == null || raw.isBlank()) ? null : raw.toUpperCase().trim();
+        pricingConfigRepo
+                .findTopByInstrumentIsinOrderByConfigDateDesc(isin)
+                .ifPresent(pc -> {
+                    pc.setDecision(newDecision);
+                    pricingConfigRepo.save(pc);
+                });
+        return ResponseEntity.noContent().build();
+    }
+
+    // PATCH /api/dashboard/{isin}/target-spread
+    // Body : { "targetSpread": 135.0 }
+    // Met à jour la cible de spread et recalcule la décision BUY/HOLD automatiquement
+    @PatchMapping("/dashboard/{isin}/target-spread")
+    public ResponseEntity<Void> updateTargetSpread(
+            @PathVariable String isin,
+            @RequestBody Map<String, Object> body) {
+        Object raw = body.get("targetSpread");
+        if (raw == null) return ResponseEntity.badRequest().build();
+        BigDecimal newTarget;
+        try {
+            newTarget = new BigDecimal(raw.toString());
+        } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().build();
+        }
+        pricingConfigRepo
+                .findTopByInstrumentIsinOrderByConfigDateDesc(isin)
+                .ifPresent(pc -> {
+                    pc.setTargetSpread(newTarget);
+                    // Recalculer la décision : G-Spread BID > nouvelle cible → BUY
+                    if (pc.getGSpreadBid() != null) {
+                        pc.setDecision(pc.getGSpreadBid().compareTo(newTarget) > 0 ? "BUY" : "HOLD");
+                    }
+                    pricingConfigRepo.save(pc);
+                });
+        return ResponseEntity.noContent().build();
     }
 
     // GET /api/pnl-daily?from=2025-01-01&to=2025-05-20

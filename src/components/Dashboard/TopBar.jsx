@@ -103,7 +103,7 @@ const TopBar = () => {
             }}
           >
             <img
-              src="/attijariwafa-logo.png"
+              src={isDark ? "/attijariwafa-dark.svg" : "/attijariwafa-light.svg"}
               alt="Attijariwafa"
               style={{ height: 22, width: "auto", objectFit: "contain" }}
             />

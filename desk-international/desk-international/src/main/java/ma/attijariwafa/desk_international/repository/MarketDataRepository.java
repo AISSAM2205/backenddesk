@@ -33,5 +33,9 @@ public interface MarketDataRepository extends JpaRepository<MarketData, Long> {
     List<MarketData> findByDataDateOrderByInstrumentIsin(LocalDate date);
 
     Optional<MarketData> findTopByInstrumentIsinOrderByDataDateDesc(String isin);
+
+    // JOIN FETCH pour éviter LazyInitializationException hors transaction
+    @Query("SELECT m FROM MarketData m JOIN FETCH m.instrument WHERE m.dataDate = :date ORDER BY m.instrument.isin")
+    List<MarketData> findByDataDateWithInstrument(@Param("date") LocalDate date);
 }
 

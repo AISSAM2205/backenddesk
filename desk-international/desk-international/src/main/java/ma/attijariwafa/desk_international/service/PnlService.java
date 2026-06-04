@@ -69,17 +69,19 @@ public class PnlService {
 
         if ("USD".equals(ccy)) {
             fx   = rates.getUsdMad();
-            rate = rates.getSofr();
+            // sofrRate stocké en % (ex: 5.33) → diviser par 100 pour formule de financement
+            rate = rates.getSofr().divide(BD100, 8, RoundingMode.HALF_UP);
         } else if ("EGP".equals(ccy)) {
             // EGP/MAD = (USD/MAD) / (USD/EGP)
             BigDecimal usdEgp = rates.getUsdEgp();
             if (usdEgp == null || usdEgp.compareTo(ZERO) == 0) return null;
             fx   = rates.getUsdMad().divide(usdEgp, 8, RoundingMode.HALF_UP);
-            rate = ZERO; // EGP T-bills: no repo funding cost
+            rate = ZERO; // EGP T-bills: pas de coût de repo
         } else {
-            // EUR and any other currency
+            // EUR et autres devises
             fx   = rates.getEurMad();
-            rate = rates.getEstr();
+            // estrRate stocké en % (ex: 3.90) → diviser par 100 pour formule de financement
+            rate = rates.getEstr().divide(BD100, 8, RoundingMode.HALF_UP);
         }
 
         // ── FORMULE 1 : Dirty marché ─────────────────────────────────

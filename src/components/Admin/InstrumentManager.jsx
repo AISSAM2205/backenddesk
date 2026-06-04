@@ -1,6 +1,7 @@
 // src/components/Admin/InstrumentManager.jsx
 import React, { useState } from "react";
-import { Button } from "antd";
+import { Button, Input, Select, DatePicker } from "antd";
+import dayjs from "dayjs";
 import { useAdmin } from "../../contexts/AdminContext";
 import { Plus, Edit, Trash2, Save, X, Briefcase } from "lucide-react";
 
@@ -355,31 +356,26 @@ const InstrumentManager = () => {
                   )}
                 </label>
                 {f.type === "select" ? (
-                  <select
-                    value={form[f.key] || ""}
-                    onChange={(e) => set(f.key, e.target.value)}
-                    className="field select"
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: "0.75rem",
-                      width: "100%",
-                    }}
-                  >
-                    <option value="">Sélectionner…</option>
-                    {f.options.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    value={form[f.key] || undefined}
+                    onChange={(val) => set(f.key, val)}
+                    placeholder="Sélectionner…"
+                    style={{ width: "100%" }}
+                    options={f.options.map((o) => ({ value: o, label: o }))}
+                  />
+                ) : f.type === "date" ? (
+                  <DatePicker
+                    value={form[f.key] ? dayjs(form[f.key]) : undefined}
+                    onChange={(date) => set(f.key, date ? date.toISOString() : null)}
+                    placeholder="Sélectionner une date…"
+                    style={{ width: "100%" }}
+                  />
                 ) : (
-                  <input
+                  <Input
                     type={f.type}
                     value={form[f.key] ?? ""}
                     step={f.step}
                     onChange={(e) => set(f.key, e.target.value)}
-                    className="field"
-                    style={{ padding: "8px 12px", fontSize: "0.75rem" }}
                   />
                 )}
               </div>

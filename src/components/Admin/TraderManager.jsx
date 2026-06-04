@@ -1,6 +1,6 @@
 // src/components/Admin/TraderManager.jsx
 import React, { useState } from "react";
-import { Button } from "antd";
+import { Button, Input, Select } from "antd";
 import { useAdmin } from "../../contexts/AdminContext";
 import { Plus, Edit, Trash2, Save, X, User, Users, Shield } from "lucide-react";
 
@@ -222,12 +222,10 @@ const TraderManager = () => {
                 >
                   {label}
                 </label>
-                <input
+                <Input
                   type={type}
                   value={form[key] || ""}
                   onChange={(e) => set(key, e.target.value)}
-                  className="field"
-                  style={{ padding: "8px 12px", fontSize: "0.78rem" }}
                 />
               </div>
             ))}
@@ -246,22 +244,12 @@ const TraderManager = () => {
               >
                 Département
               </label>
-              <select
+              <Select
                 value={form.department || "FIXED_INCOME"}
-                onChange={(e) => set("department", e.target.value)}
-                className="field select"
-                style={{
-                  padding: "8px 12px",
-                  fontSize: "0.78rem",
-                  width: "100%",
-                }}
-              >
-                {DEPTS.map((d) => (
-                  <option key={d} value={d}>
-                    {d.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => set("department", val)}
+                style={{ width: "100%" }}
+                options={DEPTS.map((d) => ({ value: d, label: d.replace(/_/g, " ") }))}
+              />
             </div>
             <div>
               <label
@@ -278,23 +266,17 @@ const TraderManager = () => {
               >
                 Statut
               </label>
-              <select
+              <Select
                 value={form.status || "ACTIF"}
-                onChange={(e) => set("status", e.target.value)}
-                className="field select"
-                style={{
-                  padding: "8px 12px",
-                  fontSize: "0.78rem",
-                  width: "100%",
-                }}
-              >
-                <option value="ACTIF">Actif</option>
-                <option value="INACTIF">Inactif</option>
-                <option value="PREMIERE_CONNEXION">
-                  1ère connexion requise
-                </option>
-                <option value="BLOQUE">Bloqué</option>
-              </select>
+                onChange={(val) => set("status", val)}
+                style={{ width: "100%" }}
+                options={[
+                  { value: "ACTIF", label: "Actif" },
+                  { value: "INACTIF", label: "Inactif" },
+                  { value: "PREMIERE_CONNEXION", label: "1ère connexion requise" },
+                  { value: "BLOQUE", label: "Bloqué" },
+                ]}
+              />
             </div>
           </div>
 

@@ -325,6 +325,15 @@ const DecisionSelect = ({ isin, current }) => {
 const Row = ({ r, idx }) => {
   const flash = useFlash(r.dirtyMarket);
   const isAlert = r.netDailyAlert;
+  // P&L Total CCY = valeur backend (latent + réalisé + futures + coupons).
+  // Fallback sur la somme locale si le backend ne renvoie pas le total.
+  const totalCcy =
+    r.totalPnlCcy != null
+      ? parseFloat(r.totalPnlCcy)
+      : parseFloat(r.pnlLatentCcy || 0) +
+        parseFloat(r.pnlRealizedCcy || 0) +
+        parseFloat(r.futuresPnlCcy || 0) +
+        parseFloat(r.couponsCcy || 0);
   const td = {
     padding: "5px 8px",
     borderBottom: "1px solid var(--b0)",
@@ -432,20 +441,11 @@ const Row = ({ r, idx }) => {
       <td
         style={{
           ...nb,
-          color: pnlColor(
-            parseFloat(r.pnlLatentCcy || 0) +
-              parseFloat(r.pnlRealizedCcy || 0) +
-              parseFloat(r.couponsCcy || 0),
-          ),
+          color: pnlColor(totalCcy),
           fontWeight: 600,
         }}
       >
-        {fN(
-          parseFloat(r.pnlLatentCcy || 0) +
-            parseFloat(r.pnlRealizedCcy || 0) +
-            parseFloat(r.couponsCcy || 0),
-          0,
-        )}
+        {fN(totalCcy, 0)}
       </td>
       <td style={{ ...nb, color: pnlColor(r.pnlAccountingMad) }}>
         {fMAD(r.pnlAccountingMad)}

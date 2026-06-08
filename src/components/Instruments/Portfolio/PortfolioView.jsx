@@ -1944,6 +1944,18 @@ const PortfolioView = () => {
   const dv01 = parseFloat(globalDashboard?.totalDv01Usd || 0);
   const netDaily = parseFloat(globalDashboard?.totalNetDailyMad || 0);
 
+  /* Yield moyen du book — YTM pondéré par le nominal (eurobonds, comme la
+     duration). Métrique cœur d'un desk taux : le rendement porté par le book. */
+  const avgYtm = useMemo(() => {
+    let wSum = 0, ySum = 0;
+    (eurobonds || []).forEach((r) => {
+      const y = parseFloat(r.yieldToMaturity);
+      const w = Math.abs(parseFloat(r.netNominal || 0));
+      if (!isNaN(y) && w > 0) { wSum += w; ySum += y * w; }
+    });
+    return wSum > 0 ? ySum / wSum : null;
+  }, [eurobonds]);
+
   const forecast = useMemo(() => {
     const now = new Date();
     const start = new Date(now.getFullYear(), 0, 1);
@@ -2215,6 +2227,24 @@ const PortfolioView = () => {
   const limitOver = limitEur != null && limitPct > 100;
   const limitConfigured = limitEur != null && limitEur > 0;
 
+  /* Concentration Top-5 : part du nominal détenue par les 5 plus grosses
+     positions. Vraie mesure de risque de concentration, bornée 0–100 %.
+     > = plus le book est concentré sur peu de lignes (= plus risqué). */
+  const concentration = useMemo(() => {
+    const noms = (positions || [])
+      .map((r) => Math.abs(parseFloat(r.netNominal || 0)))
+      .filter((n) => n > 0)
+      .sort((a, b) => b - a);
+    const total = noms.reduce((s, n) => s + n, 0);
+    if (total <= 0) return { pct: 0, count: 0, top: 0 };
+    const top5 = noms.slice(0, 5).reduce((s, n) => s + n, 0);
+    return { pct: (top5 / total) * 100, count: noms.length, top: noms.length < 5 ? noms.length : 5 };
+  }, [positions]);
+
+  /* % de l'objectif annuel atteint (P&L éco / DESK_TARGET), borné pour la jauge */
+  const targetPct = forecast?.targetPct ?? 0;
+  const targetGaugePct = Math.max(0, Math.min(Math.round(targetPct), 100));
+
   return (
     <div style={{ flex: 1, overflowY: "auto", background: "var(--void)" }}>
       {/* ── Page Header ── */}
@@ -2339,13 +2369,31 @@ const PortfolioView = () => {
                 animClass="slide-up stagger-4"
                 tooltip="Exposition nominale totale du book en USD"
               />
+            </div>
+          </div>
+
+          {/* ── Rangée Risque de Taux : Yield / Duration / DV01 ── */}
+          <div>
+            <Divider orientation="left" style={{ margin: "0 0 10px", fontSize: "0.55rem", color: "var(--tx3)", borderColor: "var(--b1)", textTransform: "uppercase", letterSpacing: "0.10em" }}>
+              Risque de Taux
+            </Divider>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+              <KpiCard
+                label="Yield Moyen"
+                value={avgYtm != null ? `${fN(avgYtm, 3)} %` : "—"}
+                sub="YTM pondéré par nominal"
+                topClass="kpi-top-blue"
+                valueColor="#60A5FA"
+                animClass="slide-up stagger-1"
+                tooltip="Rendement à maturité moyen du book obligataire, pondéré par le nominal. C'est le carry brut porté par le portefeuille."
+              />
               <KpiCard
                 label="Duration Modifiée"
                 value={dur != null ? `${fN(dur, 4)} ans` : "—"}
                 sub="Moyenne pondérée par nominal"
                 topClass="kpi-top-blue"
                 valueColor="#60A5FA"
-                animClass="slide-up stagger-5"
+                animClass="slide-up stagger-2"
                 tooltip="Sensibilité en prix à une variation de 1% des taux. Plus c'est élevé, plus le book est sensible."
               />
               <KpiCard
@@ -2354,7 +2402,7 @@ const PortfolioView = () => {
                 sub="Perte si taux +1bp"
                 topClass="kpi-top-blue"
                 valueColor="#60A5FA"
-                animClass="slide-up stagger-6"
+                animClass="slide-up stagger-3"
                 tooltip="Dollar Value of 1 Basis Point — perte en USD si les taux montent de 0.01%"
               />
             </div>
@@ -3331,50 +3379,15 @@ const PortfolioView = () => {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <p className="sect-ttl">Métriques de Risque</p>
                 <Tag style={{ fontFamily: "var(--f-mono)", fontSize: "0.58rem" }}>
-                  Util. / Limite
+                  Budget de Risque
                 </Tag>
               </div>
 
-              {/* 3 gauges Ant Design Progress */}
+              {/* 3 jauges — toutes en % d'une référence réelle (0–100 %) :
+                  consommation de limite, concentration, atteinte de l'objectif.
+                  Duration & DV01 restent en KPI chiffrés (au-dessus) — une jauge
+                  sans borne réelle n'aurait aucun sens pour un trader. */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-
-                {/* Duration */}
-                <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
-                  <Progress
-                    type="dashboard"
-                    size={82}
-                    percent={dur != null ? Math.min(Math.round((parseFloat(dur) / 12) * 100), 100) : 0}
-                    strokeColor="#60A5FA"
-                    trailColor="rgba(96,165,250,0.10)"
-                    format={() => (
-                      <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: "#60A5FA" }}>
-                        {dur != null ? `${fN(dur, 2)}y` : "—"}
-                      </span>
-                    )}
-                  />
-                  <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
-                    Duration
-                  </div>
-                </Card>
-
-                {/* DV01 */}
-                <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
-                  <Progress
-                    type="dashboard"
-                    size={82}
-                    percent={Math.min(Math.round((dv01 / 50000) * 100), 100)}
-                    strokeColor="#60A5FA"
-                    trailColor="rgba(96,165,250,0.10)"
-                    format={() => (
-                      <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: "#60A5FA" }}>
-                        {fN(dv01 / 1000, 1)}k
-                      </span>
-                    )}
-                  />
-                  <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
-                    DV01 $/bp
-                  </div>
-                </Card>
 
                 {/* Expo / Limite */}
                 <Card
@@ -3402,6 +3415,55 @@ const PortfolioView = () => {
                     Expo / Lim.
                   </div>
                 </Card>
+
+                {/* Concentration Top-5 — risque de concentration (haut = risqué) */}
+                {(() => {
+                  const c = concentration.pct;
+                  const cColor = c >= 70 ? "var(--loss)" : c >= 50 ? "var(--warn)" : "var(--profit)";
+                  return (
+                    <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
+                      <Progress
+                        type="dashboard"
+                        size={82}
+                        percent={Math.min(Math.round(c), 100)}
+                        strokeColor={cColor}
+                        trailColor="rgba(255,255,255,0.06)"
+                        format={() => (
+                          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: cColor }}>
+                            {concentration.count > 0 ? `${Math.round(c)}%` : "—"}
+                          </span>
+                        )}
+                      />
+                      <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
+                        Concentr. Top-{concentration.top}
+                      </div>
+                    </Card>
+                  );
+                })()}
+
+                {/* Objectif Annuel — % du target P&L atteint (plus = mieux) */}
+                {(() => {
+                  const tColor = targetPct < 0 ? "var(--loss)" : targetPct >= 100 ? "var(--profit)" : "var(--cyan)";
+                  return (
+                    <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
+                      <Progress
+                        type="dashboard"
+                        size={82}
+                        percent={targetGaugePct}
+                        strokeColor={tColor}
+                        trailColor="rgba(255,255,255,0.06)"
+                        format={() => (
+                          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: tColor }}>
+                            {`${Math.round(targetPct)}%`}
+                          </span>
+                        )}
+                      />
+                      <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
+                        Objectif An.
+                      </div>
+                    </Card>
+                  );
+                })()}
               </div>
 
               {/* Alertes Carry — Ant Design Alert */}

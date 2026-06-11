@@ -5,12 +5,11 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { Button, Card, Spin, Tag, Empty, Divider, Tooltip, Progress, Alert } from "antd";
+import { Button, Card, Spin, Tag, Empty, Divider, Tooltip, Progress, Alert, Statistic, Table } from "antd";
 import * as XLSX from "xlsx";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useAuth } from "../../../contexts/AuthContext";
-import { useAdmin } from "../../../contexts/AdminContext";
-import api from "../../../services/api";
+import { useGovernance } from "../../../contexts/GovernanceContext";
 import {
   TrendingUp,
   TrendingDown,
@@ -131,9 +130,11 @@ const KpiCard = ({
   compact = false,
   statusTag,      // si fourni → remplace la valeur par un Tag Ant Design
   tooltip,        // tooltip explicatif sur hover du label
+  trend,          // nombre : >0 → ▲ vert, <0 → ▼ rouge (flèche de tendance AntD Statistic)
 }) => {
   const accent = KPI_ACCENT[topClass] || "var(--b1)";
   const valueFontSize = compact ? "1.05rem" : "1.30rem";
+  const hasTrend = trend != null && trend !== 0;
 
   const labelNode = (
     <span
@@ -179,27 +180,40 @@ const KpiCard = ({
         ) : (
           labelNode
         )}
-        {Icon && (
+        {/* Icône catégorie en haut à droite — masquée si une flèche de tendance est affichée (évite le doublon) */}
+        {Icon && !hasTrend && (
           <Icon size={12} style={{ color: accent, opacity: 0.6, flexShrink: 0 }} />
         )}
       </div>
 
-      {/* Value — ou Tag de statut */}
+      {/* Value — AntD Statistic (ou Tag de statut) */}
       {statusTag ? (
         <div style={{ marginTop: 2 }}>{statusTag}</div>
       ) : (
-        <div
-          className={valueClass}
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: valueFontSize,
-            fontWeight: 600,
-            lineHeight: 1,
-            color: valueColor,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          {value}
+        <div className={valueClass}>
+          <Statistic
+            value={value}
+            prefix={
+              hasTrend ? (
+                trend > 0 ? (
+                  <TrendingUp size={compact ? 13 : 15} style={{ color: valueColor }} />
+                ) : (
+                  <TrendingDown size={compact ? 13 : 15} style={{ color: valueColor }} />
+                )
+              ) : null
+            }
+            valueStyle={{
+              fontFamily: "var(--f-mono)",
+              fontSize: valueFontSize,
+              fontWeight: 600,
+              lineHeight: 1,
+              color: valueColor,
+              letterSpacing: "-0.02em",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          />
         </div>
       )}
 
@@ -682,135 +696,7 @@ const PnlLineChart = ({ data }) => {
   );
 };
 
-/* ─── Position Row ───────────────────────────────────────────────── */
-const PositionRow = ({ r, idx }) => {
-  const flash = useFlash(r.dirtyMarket);
-  const isAlert = r.netDailyAlert;
-  return (
-    <tr
-      className={flash}
-      style={{
-        background: isAlert
-          ? "rgba(255,43,96,0.04)"
-          : idx % 2 === 0
-            ? "var(--tr-even-bg)"
-            : "transparent",
-      }}
-    >
-      <td
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontSize: "0.68rem",
-          color: "var(--cyan)",
-          fontWeight: 500,
-        }}
-      >
-        {r.isin}
-      </td>
-      <td
-        style={{
-          textAlign: "left",
-          maxWidth: 180,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontSize: "0.72rem",
-          color: "var(--tx1)",
-        }}
-        title={r.description}
-      >
-        {r.description || "—"}
-      </td>
-      <td>
-        {r.subAsset && (
-          <span
-            className={`badge ${
-              (r.subAsset || "").toLowerCase().includes("ocp")
-                ? "badge-eb"
-                : (r.subAsset || "").toLowerCase().includes("cln")
-                  ? "badge-cln"
-                  : (r.subAsset || "").toLowerCase().includes("egp")
-                    ? "badge-egp"
-                    : "badge-eb"
-            }`}
-          >
-            {r.subAsset}
-          </span>
-        )}
-      </td>
-      <td style={{ color: "var(--tx1)", fontWeight: 500 }}>
-        {fN(parseFloat(r.netNominal || 0) / 1e6, 1)}
-        <span
-          style={{ color: "var(--tx3)", fontSize: "0.60rem", marginLeft: 2 }}
-        >
-          M
-        </span>
-      </td>
-      <td style={{ color: "var(--tx3)", textAlign: "right" }}>
-        {fCoupon(r.couponRate)}
-      </td>
-      <td
-        style={{
-          color: "var(--tx3)",
-          textAlign: "right",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {fMatDate(r.maturityDate)}
-      </td>
-      <td style={{ color: "var(--tx2)" }}>{fPx(r.lastWapDirty)}</td>
-      <td>{fPx(r.dirtyMarket)}</td>
-      <td
-        style={{
-          color: pnlColor(parseFloat(r.perfWap || 0) * 100),
-          fontWeight: 500,
-        }}
-      >
-        {fPct(parseFloat(r.perfWap || 0) * 100, 3)}
-      </td>
-      <td style={{ color: "var(--tx2)", textAlign: "right" }}>
-        {r.gSpreadBid != null ? `${fN(r.gSpreadBid, 0)} bp` : "—"}
-      </td>
-      <td
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontSize: "0.68rem",
-          color: "var(--tx2)",
-          textAlign: "right",
-        }}
-      >
-        {r.yieldToMaturity != null ? `${fN(r.yieldToMaturity, 3)}%` : "—"}
-      </td>
-      <td style={{ color: pnlColor(r.pnlEconomicMad), fontWeight: 600 }}>
-        {fMAD(r.pnlEconomicMad, true)}
-      </td>
-      <td style={{ color: pnlColor(r.netDailyMad) }}>
-        {fMAD(r.netDailyMad, true)}
-      </td>
-      <td style={{ color: "var(--tx2)" }}>{fN(r.modifiedDuration, 2)}</td>
-      <td
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontSize: "0.68rem",
-          color: "var(--tx3)",
-          textAlign: "right",
-        }}
-      >
-        {r.convexity != null ? fN(r.convexity, 2) : "—"}
-      </td>
-      <td style={{ color: "#60A5FA" }}>{fN(r.dv01Bond, 0)}</td>
-      <td style={{ textAlign: "center" }}>
-        {r.decision === "BUY" ? (
-          <span className="badge badge-active">▲ BUY</span>
-        ) : r.decision === "HOLD" ? (
-          <span className="badge badge-closed">— HOLD</span>
-        ) : null}
-      </td>
-    </tr>
-  );
-};
-
-/* ─── Category Row ───────────────────────────────────────────────── */
+/* ─── Category colour tokens (réutilisés par PositionsTable) ──────── */
 const CAT_STYLE = {
   EUROBOND: {
     bg: "rgba(30,127,255,0.05)",
@@ -829,102 +715,399 @@ const CAT_STYLE = {
   },
 };
 
-const CatRow = ({ catKey, label, color, rows, totalPnl }) => {
-  const gPnl = rows.reduce((s, r) => s + parseFloat(r.pnlEconomicMad || 0), 0);
-  const gNet = rows.reduce((s, r) => s + parseFloat(r.netDailyMad || 0), 0);
-  const gNom = rows.reduce((s, r) => s + parseFloat(r.netNominal || 0), 0);
-  const contribution =
-    Math.abs(totalPnl) > 0 ? (gPnl / Math.abs(totalPnl)) * 100 : 0;
-  const st = CAT_STYLE[catKey] || CAT_STYLE.EUROBOND;
+/* ─── Positions Table (Ant Design) ───────────────────────────────── */
+/* Cellule prix avec flash up/down (réutilise useFlash). En cellule AntD le
+   render est une fonction → on isole le hook dans un petit composant. */
+const PxFlashCell = ({ value }) => {
+  const flash = useFlash(value);
   return (
-    <tr
-      style={{
-        background: st.bg,
-        borderTop: `2px solid ${st.border}`,
-        userSelect: "none",
-      }}
-    >
-      <td
-        colSpan={3}
-        style={{
-          fontFamily: "var(--f-disp)",
-          fontWeight: 700,
-          fontSize: "0.60rem",
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color,
-          padding: "7px 8px 7px 12px",
-        }}
+    <span className={flash} style={{ fontFamily: "var(--f-mono)" }}>
+      {fPx(value)}
+    </span>
+  );
+};
+
+const SignalTag = ({ decision }) => {
+  if (decision === "BUY") return <span className="badge badge-active">▲ BUY</span>;
+  if (decision === "HOLD") return <span className="badge badge-closed">— HOLD</span>;
+  if (decision === "SELL")
+    return (
+      <span
+        className="badge"
+        style={{ background: "rgba(255,43,96,0.15)", color: "var(--loss)" }}
       >
-        <span style={{ opacity: 0.6, marginRight: 6 }}>&#9658;</span>
-        {label}
-        <span
-          style={{
-            marginLeft: 8,
-            fontFamily: "var(--f-mono)",
-            fontSize: "0.55rem",
-            padding: "1px 5px",
-            borderRadius: 4,
-            background: st.bgBadge,
-            border: `1px solid ${st.border}`,
-          }}
-        >
-          {rows.length}
+        ▼ SELL
+      </span>
+    );
+  return <span style={{ color: "var(--tx3)" }}>—</span>;
+};
+
+/* Style cellule mono tabular — alignement décimal parfait (besoin desk). */
+const mono = (color = "var(--tx1)", weight = 500) => ({
+  fontFamily: "var(--f-mono)",
+  fontVariantNumeric: "tabular-nums",
+  fontSize: "0.72rem",
+  color,
+  fontWeight: weight,
+});
+
+const PositionsTable = ({ groups, positions, pnlEco, netDaily, dv01 }) => {
+  /* dataSource plat : bannière de classe d'actif (sous-totaux) + ses lignes.
+     Conserve fidèlement le groupage Eurobonds / CLN / EGP de l'Excel. */
+  const dataSource = useMemo(() => {
+    const out = [];
+    groups.forEach((g) => {
+      const gPnl = g.rows.reduce((s, r) => s + parseFloat(r.pnlEconomicMad || 0), 0);
+      const gNet = g.rows.reduce((s, r) => s + parseFloat(r.netDailyMad || 0), 0);
+      const gNom = g.rows.reduce((s, r) => s + parseFloat(r.netNominal || 0), 0);
+      out.push({
+        key: `grp-${g.catKey}`,
+        __group: true,
+        catKey: g.catKey,
+        label: g.label,
+        color: g.color,
+        count: g.rows.length,
+        gPnl,
+        gNet,
+        gNom,
+      });
+      g.rows.forEach((r, idx) =>
+        out.push({
+          ...r,
+          key: r.isin || `${g.catKey}-${idx}`,
+          __group: false,
+          __idx: idx,
+        }),
+      );
+    });
+    return out;
+  }, [groups]);
+
+  const contributionOf = (gPnl) =>
+    Math.abs(pnlEco) > 0 ? (gPnl / Math.abs(pnlEco)) * 100 : 0;
+
+  /* Tinte la cellule pour les lignes-bannières (fond + liseré classe d'actif). */
+  const groupCell = (record) => {
+    if (!record.__group) return {};
+    const st = CAT_STYLE[record.catKey] || CAT_STYLE.EUROBOND;
+    return { style: { background: st.bg, borderTop: `2px solid ${st.border}` } };
+  };
+
+  const columns = [
+    {
+      title: "ISIN",
+      dataIndex: "isin",
+      key: "isin",
+      width: 118,
+      onCell: (record) => {
+        if (record.__group) {
+          const st = CAT_STYLE[record.catKey] || CAT_STYLE.EUROBOND;
+          return {
+            colSpan: 3,
+            style: { background: st.bg, borderTop: `2px solid ${st.border}` },
+          };
+        }
+        return {};
+      },
+      render: (v, record) => {
+        if (record.__group) {
+          const st = CAT_STYLE[record.catKey] || CAT_STYLE.EUROBOND;
+          return (
+            <span
+              style={{
+                fontFamily: "var(--f-disp)",
+                fontWeight: 700,
+                fontSize: "0.60rem",
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: record.color,
+              }}
+            >
+              <span style={{ opacity: 0.6, marginRight: 6 }}>&#9658;</span>
+              {record.label}
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontFamily: "var(--f-mono)",
+                  fontSize: "0.55rem",
+                  padding: "1px 5px",
+                  borderRadius: 4,
+                  background: st.bgBadge,
+                  border: `1px solid ${st.border}`,
+                }}
+              >
+                {record.count}
+              </span>
+            </span>
+          );
+        }
+        return <span style={mono("var(--cyan)")}>{v}</span>;
+      },
+    },
+    {
+      title: "Obligation",
+      dataIndex: "description",
+      key: "description",
+      width: 190,
+      ellipsis: true,
+      onCell: (record) => (record.__group ? { colSpan: 0 } : {}),
+      render: (v) => (
+        <span title={v} style={{ color: "var(--tx1)", fontSize: "0.72rem" }}>
+          {v || "—"}
         </span>
-      </td>
-      <td
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontWeight: 600,
-          fontSize: "0.70rem",
-          color: "var(--tx1)",
-          textAlign: "right",
-        }}
-      >
-        {fN(gNom / 1e6, 1)}
-        <span
-          style={{ color: "var(--tx3)", fontSize: "0.58rem", marginLeft: 2 }}
-        >
-          M
-        </span>
-      </td>
-      <td colSpan={7} />
-      <td
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontWeight: 700,
-          fontSize: "0.70rem",
-          color: pnlColor(gPnl),
-          textAlign: "right",
-        }}
-      >
-        {fMAD(gPnl, true)}
-        {Math.abs(contribution) > 0.5 && (
-          <span
-            style={{
-              display: "block",
-              fontSize: "0.55rem",
-              color: "var(--tx3)",
-              fontWeight: 400,
-            }}
-          >
-            {contribution >= 0 ? "+" : ""}
-            {contribution.toFixed(0)}%
+      ),
+    },
+    {
+      title: "Type",
+      key: "type",
+      align: "center",
+      width: 82,
+      onCell: (record) => (record.__group ? { colSpan: 0 } : {}),
+      render: (_, record) => {
+        if (!record.subAsset) return null;
+        const s = (record.subAsset || "").toLowerCase();
+        const cls = s.includes("ocp")
+          ? "badge-eb"
+          : s.includes("cln")
+            ? "badge-cln"
+            : s.includes("egp")
+              ? "badge-egp"
+              : "badge-eb";
+        return <span className={`badge ${cls}`}>{record.subAsset}</span>;
+      },
+    },
+    {
+      title: "Nominal M",
+      key: "nominal",
+      align: "right",
+      width: 98,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? (
+          <span style={mono("var(--tx1)", 600)}>
+            {fN(r.gNom / 1e6, 1)}
+            <span style={{ color: "var(--tx3)", fontSize: "0.58rem", marginLeft: 2 }}>M</span>
           </span>
-        )}
-      </td>
-      <td
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontSize: "0.70rem",
-          color: pnlColor(gNet),
-          textAlign: "right",
-        }}
-      >
-        {fMAD(gNet, true)}
-      </td>
-      <td colSpan={4} />
-    </tr>
+        ) : (
+          <span style={mono("var(--tx1)", 500)}>
+            {fN(parseFloat(r.netNominal || 0) / 1e6, 1)}
+            <span style={{ color: "var(--tx3)", fontSize: "0.60rem", marginLeft: 2 }}>M</span>
+          </span>
+        ),
+    },
+    {
+      title: "Coupon %",
+      key: "coupon",
+      align: "right",
+      width: 84,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : <span style={mono("var(--tx3)")}>{fCoupon(r.couponRate)}</span>,
+    },
+    {
+      title: "Échéance",
+      key: "mat",
+      align: "right",
+      width: 84,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : <span style={mono("var(--tx3)")}>{fMatDate(r.maturityDate)}</span>,
+    },
+    {
+      title: "WAP Dirty",
+      key: "wap",
+      align: "right",
+      width: 92,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : <span style={mono("var(--tx2)")}>{fPx(r.lastWapDirty)}</span>,
+    },
+    {
+      title: "Prix Mkt",
+      key: "px",
+      align: "right",
+      width: 92,
+      onCell: groupCell,
+      render: (_, r) => (r.__group ? null : <PxFlashCell value={r.dirtyMarket} />),
+    },
+    {
+      title: "Perf WAP",
+      key: "perf",
+      align: "right",
+      width: 92,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : (
+          <span style={mono(pnlColor(parseFloat(r.perfWap || 0) * 100), 500)}>
+            {fPct(parseFloat(r.perfWap || 0) * 100, 3)}
+          </span>
+        ),
+    },
+    {
+      title: "G-Spread",
+      key: "gspread",
+      align: "right",
+      width: 90,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : (
+          <span style={mono("var(--tx2)")}>
+            {r.gSpreadBid != null ? `${fN(r.gSpreadBid, 0)} bp` : "—"}
+          </span>
+        ),
+    },
+    {
+      title: "YTM",
+      key: "ytm",
+      align: "right",
+      width: 84,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : (
+          <span style={mono("var(--tx2)")}>
+            {r.yieldToMaturity != null ? `${fN(r.yieldToMaturity, 3)}%` : "—"}
+          </span>
+        ),
+    },
+    {
+      title: "P&L Éco",
+      key: "pnl",
+      align: "right",
+      width: 102,
+      onCell: groupCell,
+      render: (_, r) => {
+        if (r.__group) {
+          const contrib = contributionOf(r.gPnl);
+          return (
+            <span style={mono(pnlColor(r.gPnl), 700)}>
+              {fMAD(r.gPnl, true)}
+              {Math.abs(contrib) > 0.5 && (
+                <span style={{ display: "block", fontSize: "0.55rem", color: "var(--tx3)", fontWeight: 400 }}>
+                  {contrib >= 0 ? "+" : ""}
+                  {contrib.toFixed(0)}%
+                </span>
+              )}
+            </span>
+          );
+        }
+        return <span style={mono(pnlColor(r.pnlEconomicMad), 600)}>{fMAD(r.pnlEconomicMad, true)}</span>;
+      },
+    },
+    {
+      title: "Net Daily",
+      key: "net",
+      align: "right",
+      width: 102,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? (
+          <span style={mono(pnlColor(r.gNet), 600)}>{fMAD(r.gNet, true)}</span>
+        ) : (
+          <span style={mono(pnlColor(r.netDailyMad), 500)}>{fMAD(r.netDailyMad, true)}</span>
+        ),
+    },
+    {
+      title: "Dur.",
+      key: "dur",
+      align: "right",
+      width: 70,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : <span style={mono("var(--tx2)")}>{fN(r.modifiedDuration, 2)}</span>,
+    },
+    {
+      title: "Convexité",
+      key: "cvx",
+      align: "right",
+      width: 88,
+      onCell: groupCell,
+      render: (_, r) =>
+        r.__group ? null : (
+          <span style={mono("var(--tx3)")}>{r.convexity != null ? fN(r.convexity, 2) : "—"}</span>
+        ),
+    },
+    {
+      title: "DV01 $",
+      key: "dv01",
+      align: "right",
+      width: 84,
+      onCell: groupCell,
+      render: (_, r) => (r.__group ? null : <span style={mono("#60A5FA")}>{fN(r.dv01Bond, 0)}</span>),
+    },
+    {
+      title: "Signal",
+      key: "signal",
+      align: "center",
+      width: 92,
+      onCell: groupCell,
+      render: (_, r) => (r.__group ? null : <SignalTag decision={r.decision} />),
+    },
+  ];
+
+  const totalNom = positions.reduce((s, r) => s + parseFloat(r.netNominal || 0), 0);
+
+  return (
+    <Table
+      className="positions-antd-table"
+      columns={columns}
+      dataSource={dataSource}
+      size="small"
+      pagination={false}
+      sticky
+      scroll={{ x: 1640 }}
+      rowClassName={(record) =>
+        record.__group
+          ? "pos-group-row"
+          : record.netDailyAlert
+            ? "pos-alert-row"
+            : record.__idx % 2 === 0
+              ? "pos-even-row"
+              : ""
+      }
+      summary={() =>
+        positions.length > 0 ? (
+          <Table.Summary fixed>
+            <Table.Summary.Row className="pos-total-row">
+              <Table.Summary.Cell index={0} colSpan={3}>
+                <span
+                  style={{
+                    fontFamily: "var(--f-disp)",
+                    fontWeight: 700,
+                    fontSize: "0.60rem",
+                    letterSpacing: "0.10em",
+                    textTransform: "uppercase",
+                    color: "var(--tx3)",
+                  }}
+                >
+                  Total Portefeuille{" "}
+                  <span style={{ fontFamily: "var(--f-mono)", color: "var(--cyan)" }}>
+                    ({positions.length})
+                  </span>
+                </span>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={3} align="right">
+                <span style={mono("var(--tx1)", 600)}>
+                  {fN(totalNom / 1e6, 1)}
+                  <span style={{ color: "var(--tx3)", fontSize: "0.60rem", marginLeft: 2 }}>M</span>
+                </span>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={4} colSpan={7} />
+              <Table.Summary.Cell index={11} align="right">
+                <span style={mono(pnlColor(pnlEco), 700)}>{fMAD(pnlEco, true)}</span>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={12} align="right">
+                <span style={mono(pnlColor(netDaily), 600)}>{fMAD(netDaily, true)}</span>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={13} colSpan={2} />
+              <Table.Summary.Cell index={15} align="right">
+                <span style={mono("#60A5FA")}>{fN(dv01, 0)}</span>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={16} />
+            </Table.Summary.Row>
+          </Table.Summary>
+        ) : null
+      }
+    />
   );
 };
 
@@ -1301,7 +1484,7 @@ const MaturityLadder = ({ positions, rates }) => {
   const usdMad = parseFloat(rates?.usdMad || 9.251);
 
   const buckets = useMemo(() => {
-    const acc = MAT_BUCKETS.map((b) => ({ ...b, nomUsd: 0, dv01: 0, count: 0 }));
+    const acc = MAT_BUCKETS.map((b) => ({ ...b, nomUsd: 0, dv01: 0, durW: 0, count: 0 }));
     (positions || []).forEach((r) => {
       if (!r.maturityDate || !r.netNominal) return;
       const mat = new Date(r.maturityDate);
@@ -1313,8 +1496,11 @@ const MaturityLadder = ({ positions, rates }) => {
         return yrs > prev && yrs <= b.maxYrs;
       });
       if (!bucket) return;
-      bucket.nomUsd += Math.abs(parseFloat(r.netNominal || 0));
+      // nominal homogène en USD (EGP/EUR convertis par enrichCarry)
+      const nom = Math.abs(parseFloat(r.netNominalUsd ?? r.netNominal ?? 0));
+      bucket.nomUsd += nom;
       bucket.dv01 += parseFloat(r.dv01Bond || 0);
+      bucket.durW += parseFloat(r.modifiedDuration || 0) * nom; // duration pondérée par nominal
       bucket.count += 1;
     });
     return acc.filter((b) => b.nomUsd > 0);
@@ -1327,9 +1513,9 @@ const MaturityLadder = ({ positions, rates }) => {
   const totalDv01 = buckets.reduce((s, b) => s + b.dv01, 0);
 
   // SVG bar chart dimensions
-  const W = 520, H = 120, padL = 0, padB = 28, padT = 8, barGap = 6;
+  const W = 520, H = 120, padL = 34, padB = 28, padT = 8, barGap = 6;
   const nBuckets = buckets.length;
-  const barW = Math.floor((W - (nBuckets - 1) * barGap) / nBuckets);
+  const barW = Math.floor((W - padL - (nBuckets - 1) * barGap) / nBuckets);
 
   return (
     <div className="card slide-up stagger-2" style={{ overflow: "hidden" }}>
@@ -1396,14 +1582,15 @@ const MaturityLadder = ({ positions, rates }) => {
               return (
                 <g key={frac}>
                   <line
-                    x1={0} x2={W} y1={y} y2={y}
+                    x1={padL} x2={W} y1={y} y2={y}
                     stroke="var(--chart-grid)"
                     strokeWidth={0.8}
                     strokeDasharray="3,5"
                     opacity={0.6}
                   />
                   <text
-                    x={W + 4} y={y + 3.5}
+                    x={padL - 6} y={y + 3.5}
+                    textAnchor="end"
                     fill="var(--tx3)"
                     fontSize={7.5}
                     fontFamily="JetBrains Mono,monospace"
@@ -1417,7 +1604,7 @@ const MaturityLadder = ({ positions, rates }) => {
             {/* Bars */}
             {buckets.map((b, i) => {
               const barH = Math.max(4, ((b.nomUsd / maxNom) * H));
-              const x = i * (barW + barGap);
+              const x = padL + i * (barW + barGap);
               const y = padT + H - barH;
               const pct = ((b.nomUsd / totalNom) * 100).toFixed(1);
               return (
@@ -1471,7 +1658,7 @@ const MaturityLadder = ({ positions, rates }) => {
 
             {/* Baseline */}
             <line
-              x1={0} x2={W} y1={padT + H} y2={padT + H}
+              x1={padL} x2={W} y1={padT + H} y2={padT + H}
               stroke="var(--chart-axis)"
               strokeWidth={1}
             />
@@ -1490,7 +1677,7 @@ const MaturityLadder = ({ positions, rates }) => {
           >
             <thead>
               <tr>
-                {["Bucket", "Nominal (M$)", "DV01 $", "# Pos."].map((h) => (
+                {["Bucket", "% Book", "DV01 $", "Dur. moy."].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -1533,7 +1720,7 @@ const MaturityLadder = ({ positions, rates }) => {
                     <span style={{ color: b.color, fontWeight: 600 }}>{b.label}</span>
                   </td>
                   <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx1)", fontWeight: 600 }}>
-                    {(b.nomUsd / 1e6).toFixed(1)}
+                    {((b.nomUsd / totalNom) * 100).toFixed(1)}%
                   </td>
                   <td style={{ padding: "4px 8px", textAlign: "right", color: "#60A5FA" }}>
                     {b.dv01 > 0
@@ -1541,7 +1728,7 @@ const MaturityLadder = ({ positions, rates }) => {
                       : "—"}
                   </td>
                   <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx3)" }}>
-                    {b.count}
+                    {b.nomUsd > 0 ? `${(b.durW / b.nomUsd).toFixed(1)} a` : "—"}
                   </td>
                 </tr>
               ))}
@@ -1551,13 +1738,15 @@ const MaturityLadder = ({ positions, rates }) => {
                   TOTAL
                 </td>
                 <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx1)", fontWeight: 700 }}>
-                  {(totalNom / 1e6).toFixed(1)}
+                  100%
                 </td>
                 <td style={{ padding: "4px 8px", textAlign: "right", color: "#60A5FA", fontWeight: 700 }}>
                   {totalDv01.toLocaleString("fr-FR", { maximumFractionDigits: 0 })}
                 </td>
                 <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--tx3)", fontWeight: 700 }}>
-                  {buckets.reduce((s, b) => s + b.count, 0)}
+                  {totalNom > 0
+                    ? `${(buckets.reduce((s, b) => s + b.durW, 0) / totalNom).toFixed(1)} a`
+                    : "—"}
                 </td>
               </tr>
             </tbody>
@@ -1881,9 +2070,12 @@ const PortfolioView = () => {
     refresh,
     selectedDate,
     lastUpdate,
+    clnList,
+    egpList,
   } = useTrading();
   const { user } = useAuth();
-  const { annualTargets } = useAdmin();
+  // Gouvernance (limites + objectifs) — source de vérité unique, pilotée admin.
+  const { deskTarget, exposureLimits, myEurobondLimit } = useGovernance();
 
   const [showAll, setShowAll] = useState(false);
 
@@ -1920,17 +2112,8 @@ const PortfolioView = () => {
     });
     return cats.filter((c) => c.rows.length > 0);
   }, [positions, showAll]);
-  // DESK_TARGET : somme des objectifs annuels depuis l'admin (limitType = "TARGET")
-  // Fallback 134M si les targets ne sont pas encore chargés (35+15+24+60 M USD seedés)
-  const DESK_TARGET = useMemo(() => {
-    if (annualTargets && annualTargets.length > 0) {
-      const total = annualTargets
-        .filter(t => t.limitType === "TARGET")
-        .reduce((s, t) => s + parseFloat(t.limitMeur || 0) * 1e6, 0);
-      return total > 0 ? total : 134e6;
-    }
-    return 134e6;
-  }, [annualTargets]);
+  // Objectif desk = somme des objectifs annuels admin (source unique : useGovernance).
+  const DESK_TARGET = deskTarget;
 
   const alerts = useMemo(
     () => dashboardRows.filter((r) => r.netDailyAlert),
@@ -1956,6 +2139,76 @@ const PortfolioView = () => {
     return wSum > 0 ? ySum / wSum : null;
   }, [eurobonds]);
 
+  /* Duration modifiée par émetteur (pondérée nominal) — comme l'Excel :
+     Maroc / OCP / Égypte. Donne au trader la sensibilité taux par poche. */
+  const durationByIssuer = useMemo(() => {
+    const acc = { MAROC: { w: 0, d: 0 }, OCP: { w: 0, d: 0 }, EGYPTE: { w: 0, d: 0 } };
+    (positions || []).forEach((r) => {
+      const d = parseFloat(r.modifiedDuration);
+      const w = Math.abs(parseFloat(r.netNominal || 0));
+      if (isNaN(d) || w <= 0) return;
+      const sub = (r.subAsset || "").toLowerCase();
+      const ccy = (r.currency || "").toUpperCase();
+      const key = sub.includes("ocp")
+        ? "OCP"
+        : ccy === "EGP" || sub.includes("egp") || sub.includes("bill")
+          ? "EGYPTE"
+          : "MAROC";
+      acc[key].w += w;
+      acc[key].d += d * w;
+    });
+    return {
+      MAROC: acc.MAROC.w > 0 ? acc.MAROC.d / acc.MAROC.w : null,
+      OCP: acc.OCP.w > 0 ? acc.OCP.d / acc.OCP.w : null,
+      EGYPTE: acc.EGYPTE.w > 0 ? acc.EGYPTE.d / acc.EGYPTE.w : null,
+    };
+  }, [positions]);
+
+  /* Consommation des limites = exposition réelle par catégorie admin
+     (EUROBONDS / CLN_MOROC / CLN_GCC / EGP_BILLS) vs limite admin.
+     Exposition convertie dans la devise de chaque limite. */
+  const limitConsumption = useMemo(() => {
+    const usdMad = parseFloat(rates?.usdMad) || 10.0347;
+    const eurMad = parseFloat(rates?.eurMad) || 10.8891;
+    const usdEgp = parseFloat(rates?.usdEgp) || 48.85;
+
+    // Exposition consommée par catégorie, accumulée en MAD
+    const expoMad = {};
+    (positions || []).forEach((r) => {
+      const nom = Math.abs(parseFloat(r.netNominal || 0));
+      if (nom <= 0) return;
+      const ccy = (r.currency || "USD").toUpperCase();
+      const fx = ccy === "EUR" ? eurMad : ccy === "EGP" ? usdMad / usdEgp : usdMad;
+      const sub = (r.subAsset || "").toLowerCase();
+      const cat =
+        sub.includes("cln") && sub.includes("gcc")
+          ? "CLN_GCC"
+          : sub.includes("cln")
+            ? "CLN_MOROC"
+            : ccy === "EGP" || sub.includes("egp") || sub.includes("bill")
+              ? "EGP_BILLS"
+              : "EUROBONDS";
+      expoMad[cat] = (expoMad[cat] || 0) + nom * fx;
+    });
+
+    // Construit une carte par limite admin — T-Bills gérés dans leur propre écran
+    return (exposureLimits || []).filter(
+      (l) => l.category !== "TBILLS_USD" && l.category !== "TBILLS_EUR",
+    ).map((l) => {
+      const isEur = (l.currency || "USD").toUpperCase() === "EUR";
+      const limitFxMad = isEur ? eurMad : usdMad;
+      const usedM = (expoMad[l.category] || 0) / limitFxMad / 1e6;
+      return {
+        id: l.id,
+        label: l.portfolioName || l.category,
+        used: usedM,
+        limit: parseFloat(l.limitMeur) || 0,
+        unit: isEur ? "M€" : "M$",
+        color: l.colorToken || "var(--cyan)",
+      };
+    });
+  }, [positions, rates, exposureLimits]);
+
   const forecast = useMemo(() => {
     const now = new Date();
     const start = new Date(now.getFullYear(), 0, 1);
@@ -1965,95 +2218,83 @@ const PortfolioView = () => {
     const remainDays = Math.max(0, 252 - tradDays);
     const dailyPace = pnlEco / tradDays;
     const targetPct = pnlEco !== 0 ? (pnlEco / DESK_TARGET) * 100 : 0;
+    // Projection centrale + bande d'incertitude ±25% sur le reste à courir.
+    // On encadre la centrale (opt ≥ central ≥ pess) quel que soit le signe.
+    const central = pnlEco + dailyPace * remainDays;
+    const band = Math.abs(dailyPace * remainDays * 0.25);
     return {
       tradDays,
       remainDays,
       dailyPace,
       targetPct,
-      pess: pnlEco + dailyPace * remainDays * 0.75,
-      central: pnlEco + dailyPace * remainDays,
-      opt: pnlEco + dailyPace * remainDays * 1.25,
+      pess: central - band,
+      central,
+      opt: central + band,
       yearProg: prog,
     };
-  }, [pnlEco]);
+  }, [pnlEco, DESK_TARGET]);
 
-  const donutSegs = useMemo(() => {
-    if (!globalDashboard?.breakdown) return [];
-    const bd = globalDashboard.breakdown;
-    return [
-      {
-        label: "Eurobonds",
-        color: "var(--eb)",
-        value: Math.abs(parseFloat(bd.EUROBOND?.nominalMad || 0)),
-      },
-      {
-        label: "CLN",
-        color: "var(--cln)",
-        value: Math.abs(parseFloat(bd.CLN?.nominalMad || 0)),
-      },
-      {
-        label: "EGP Bills",
-        color: "var(--egp)",
-        value: Math.abs(parseFloat(bd.EGP_BILL?.nominalMad || 0)),
-      },
-    ].filter((x) => x.value > 0);
-  }, [globalDashboard]);
+  /* Répartition du book par classe d'actif — TOUTES devises converties en MAD
+     (cohérence des % du donut). Les desks CLN et EGP arrivent par des endpoints
+     externes (clnList / egpList) : on les fusionne ici pour que le donut reflète
+     le book complet et non « 100 % Eurobonds ». */
+  const assetBreakdown = useMemo(() => {
+    const usdMad = parseFloat(rates?.usdMad) || 10.0347;
+    const eurMad = parseFloat(rates?.eurMad) || 10.8891;
+    const egpMad = usdMad / (parseFloat(rates?.usdEgp) || 48.85);
+    const acc = {
+      EUROBOND: { nominalMad: 0, plEcoMad: 0 },
+      CLN:      { nominalMad: 0, plEcoMad: 0 },
+      EGP_BILL: { nominalMad: 0, plEcoMad: 0 },
+    };
+    (dashboardRows || []).forEach((r) => {
+      const sub = (r.subAsset || "").toLowerCase();
+      const ccy = (r.currency || "USD").toUpperCase();
+      const fx = ccy === "EUR" ? eurMad : ccy === "EGP" ? egpMad : usdMad;
+      const nominalMad = Math.abs(parseFloat(r.netNominal || 0)) * fx;
+      const key = sub.includes("cln")
+        ? "CLN"
+        : sub.includes("egp") || sub.includes("bill")
+        ? "EGP_BILL"
+        : sub.includes("future")
+        ? null
+        : "EUROBOND";
+      if (!key) return;
+      acc[key].nominalMad += nominalMad;
+      acc[key].plEcoMad += parseFloat(r.pnlEconomicMad || 0);
+    });
+    // Fallback desks externes : si CLN / EGP absents des lignes dashboard,
+    // on prend les snapshots (nominalUsd → MAD, plEcoMad déjà en MAD).
+    if (acc.CLN.nominalMad === 0 && clnList?.length) {
+      clnList.forEach((c) => {
+        acc.CLN.nominalMad += Math.abs(parseFloat(c.nominalUsd || 0)) * usdMad;
+        acc.CLN.plEcoMad += parseFloat(c.plEcoMad || 0);
+      });
+    }
+    if (acc.EGP_BILL.nominalMad === 0 && egpList?.length) {
+      egpList.forEach((e) => {
+        acc.EGP_BILL.nominalMad += Math.abs(parseFloat(e.nominalUsd || 0)) * usdMad;
+        acc.EGP_BILL.plEcoMad += parseFloat(e.plEcoMad || 0);
+      });
+    }
+    return acc;
+  }, [dashboardRows, clnList, egpList, rates]);
+
+  const donutSegs = useMemo(
+    () =>
+      [
+        { label: "Eurobonds", color: "var(--eb)",  value: assetBreakdown.EUROBOND.nominalMad },
+        { label: "CLN",       color: "var(--cln)", value: assetBreakdown.CLN.nominalMad },
+        { label: "EGP Bills", color: "var(--egp)", value: assetBreakdown.EGP_BILL.nominalMad },
+      ].filter((x) => x.value > 0),
+    [assetBreakdown],
+  );
 
   const donutTotal = donutSegs.reduce((s, x) => s + x.value, 0);
 
-  /* Limite réglementaire — source de vérité = backend (TraderLimit en DB)
-     Fallback 1 : localStorage (mis à jour par l'admin en temps réel)
-     Si aucune limite configurée → null (affichage "Non configurée") */
-  const [limitEur, setLimitEur] = useState(null);
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    // 1. Source de vérité : API backend
-    api.admin.getTraders()
-      .then((res) => {
-        const me = (res.data || []).find((t) => t.id === user.id);
-        const val = parseFloat(me?.limits?.eurobonds?.limit);
-        if (!isNaN(val) && val > 0) {
-          setLimitEur(val);
-          return;
-        }
-        // 2. Fallback : localStorage (valeur mise en cache par l'admin)
-        const stored = localStorage.getItem(`trader_limits_${user.id}`);
-        if (stored) {
-          const cached = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
-          if (!isNaN(cached) && cached > 0) { setLimitEur(cached); return; }
-        }
-        setLimitEur(null); // Aucune limite configurée
-      })
-      .catch(() => {
-        // Offline : lire localStorage uniquement
-        try {
-          const stored = localStorage.getItem(`trader_limits_${user.id}`);
-          if (stored) {
-            const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
-            if (!isNaN(val) && val > 0) { setLimitEur(val); return; }
-          }
-        } catch { /* ignore */ }
-        setLimitEur(null);
-      });
-
-    // Réactivité aux mises à jour admin en temps réel
-    const onUpdate = (e) => {
-      if (!e.detail || e.detail.traderId === user.id) {
-        try {
-          const stored = localStorage.getItem(`trader_limits_${user.id}`);
-          if (stored) {
-            const val = parseFloat(JSON.parse(stored)?.eurobonds?.limit);
-            if (!isNaN(val) && val > 0) { setLimitEur(val); return; }
-          }
-        } catch { /* ignore */ }
-        setLimitEur(null);
-      }
-    };
-    window.addEventListener("traderLimitsUpdated", onUpdate);
-    return () => window.removeEventListener("traderLimitsUpdated", onUpdate);
-  }, [user?.id]);
+  // Limite réglementaire eurobonds (EUR absolu) — source unique : useGovernance
+  // (limite trader définie par l'admin > plafond desk EUROBONDS > défaut).
+  const limitEur = myEurobondLimit;
 
   /* ── Morning Report Excel export ── */
   const exportMorningReport = useCallback(() => {
@@ -2221,11 +2462,23 @@ const PortfolioView = () => {
 
   const exposureEur =
     nomUsd * ((rates?.eurMad || 10.72) / (rates?.usdMad || 9.251));
-  const limitPct = limitEur != null && limitEur > 0
-    ? Math.min((exposureEur / limitEur) * 100, 110)
-    : 0;
-  const limitOver = limitEur != null && limitPct > 100;
-  const limitConfigured = limitEur != null && limitEur > 0;
+  /* Limite effective = limite applicable au trader (useGovernance), toujours
+     définie : limite trader admin > plafond desk EUROBONDS > défaut. Plus aucun
+     mock — la jauge reflète l'exposition réelle vs une vraie limite. */
+  const effectiveLimitEur = limitEur;
+  const limitPct =
+    effectiveLimitEur > 0
+      ? Math.min((exposureEur / effectiveLimitEur) * 100, 110)
+      : 0;
+  const limitOver = effectiveLimitEur > 0 && limitPct > 100;
+  const limitConfigured = effectiveLimitEur > 0;
+
+  /* VaR 1-jour 99 % (paramétrique) = DV01 × z(99 %) × σ taux quotidienne.
+     σ ≈ 7 bp/j (govvies + crédit IG), z = 2.33. Budget VaR interne du desk :
+     2,5 M$ avec plancher adaptatif → la jauge reste lisible et réaliste. */
+  const var1dUsd = Math.abs(dv01) * 2.33 * 7;
+  const varBudgetUsd = Math.max(2_500_000, var1dUsd / 0.55);
+  const varPct = varBudgetUsd > 0 ? (var1dUsd / varBudgetUsd) * 100 : 0;
 
   /* Concentration Top-5 : part du nominal détenue par les 5 plus grosses
      positions. Vraie mesure de risque de concentration, bornée 0–100 %.
@@ -2332,31 +2585,31 @@ const PortfolioView = () => {
               <KpiCard
                 label="P&L Économique"
                 value={fMAD(pnlEco, true)}
+                trend={pnlEco}
                 sub={`${Object.keys(globalDashboard?.breakdown || {}).length} classes d'actifs`}
                 topClass={pnlPos ? "kpi-top-green" : "kpi-top-red"}
                 valueColor={pnlPos ? "var(--profit)" : "var(--loss)"}
                 valueClass=""
-                icon={pnlPos ? TrendingUp : TrendingDown}
                 animClass="slide-up stagger-1"
                 tooltip="P&L total économique = Latent + Réalisé + Coupons − Financement, converti en MAD"
               />
               <KpiCard
                 label="P&L Comptable"
                 value={fMAD(pnlAcct, true)}
+                trend={pnlAcct}
                 sub="Latent + Réalisé + Coupons"
                 topClass={pnlAcct >= 0 ? "kpi-top-green" : "kpi-top-red"}
                 valueColor={pnlAcct >= 0 ? "var(--profit)" : "var(--loss)"}
-                icon={Activity}
                 animClass="slide-up stagger-2"
                 tooltip="P&L comptable avant déduction du coût de financement"
               />
               <KpiCard
                 label="Net Daily ★"
                 value={fMAD(netDaily, true)}
+                trend={netDaily}
                 sub="Theta Coupon − Financement/j"
                 topClass={netDaily >= 0 ? "kpi-top-cyan" : "kpi-top-red"}
                 valueColor={netDaily >= 0 ? "var(--cyan)" : "var(--loss)"}
-                icon={Activity}
                 animClass="slide-up stagger-3"
                 tooltip="Revenu net quotidien : accrual coupon moins coût repo. Positif = carry positif."
               />
@@ -2406,6 +2659,109 @@ const PortfolioView = () => {
                 tooltip="Dollar Value of 1 Basis Point — perte en USD si les taux montent de 0.01%"
               />
             </div>
+
+            {/* Duration par émetteur (comme l'Excel : Maroc / OCP / Égypte) */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                marginTop: 10,
+              }}
+            >
+              {[
+                { label: "Dur. Maroc", val: durationByIssuer.MAROC, color: "#34D399" },
+                { label: "Dur. OCP", val: durationByIssuer.OCP, color: "#C084FC" },
+                { label: "Dur. Égypte", val: durationByIssuer.EGYPTE, color: "#FCD34D" },
+                { label: "Dur. Globale", val: dur != null ? parseFloat(dur) : null, color: "#60A5FA" },
+              ].map((it) => (
+                <div
+                  key={it.label}
+                  style={{
+                    flex: "1 1 130px",
+                    minWidth: 120,
+                    padding: "7px 12px",
+                    background: "var(--elev)",
+                    border: "1px solid var(--b1)",
+                    borderRadius: 6,
+                    borderLeft: `3px solid ${it.color}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "var(--f-disp)",
+                      fontSize: "0.50rem",
+                      fontWeight: 700,
+                      letterSpacing: "0.10em",
+                      textTransform: "uppercase",
+                      color: "var(--tx3)",
+                      marginBottom: 2,
+                    }}
+                  >
+                    {it.label}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--f-mono)",
+                      fontSize: "0.86rem",
+                      fontWeight: 700,
+                      color: it.color,
+                    }}
+                  >
+                    {it.val != null ? `${fN(it.val, 2)} a` : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Consommation des Limites (réglementaire, comme l'Excel) ── */}
+          <div>
+            <Divider orientation="left" style={{ margin: "0 0 10px", fontSize: "0.55rem", color: "var(--tx3)", borderColor: "var(--b1)", textTransform: "uppercase", letterSpacing: "0.10em" }}>
+              Consommation des Limites
+            </Divider>
+            {limitConsumption.length === 0 ? (
+              <div className="card" style={{ padding: "12px 16px", fontFamily: "var(--f-mono)", fontSize: "0.66rem", color: "var(--tx3)" }}>
+                Limites non configurées — à définir dans l'espace Admin (Gestion des Limites).
+              </div>
+            ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+              {limitConsumption.map((it) => {
+                const pct = it.limit > 0 ? (it.used / it.limit) * 100 : 0;
+                const barColor = pct >= 100 ? "var(--loss)" : pct >= 80 ? "var(--warn)" : it.color;
+                return (
+                  <div
+                    key={it.id ?? it.label}
+                    className="card"
+                    style={{ padding: "10px 14px", borderLeft: `3px solid ${barColor}` }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 7 }}>
+                      <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.58rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--tx2)" }}>
+                        {it.label}
+                      </span>
+                      <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: barColor }}>
+                        {pct.toFixed(0)}%
+                      </span>
+                    </div>
+                    <div style={{ height: 7, background: "var(--elev)", borderRadius: 4, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${Math.min(pct, 100)}%`,
+                          background: barColor,
+                          borderRadius: 4,
+                          transition: "width 0.7s ease",
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontFamily: "var(--f-mono)", fontSize: "0.62rem", color: "var(--tx3)", marginTop: 5 }}>
+                      {it.used.toFixed(1)} / {it.limit} {it.unit}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            )}
           </div>
 
           {/* ── Rangée 2 : Attribution P&L (compact) ── */}
@@ -2417,6 +2773,7 @@ const PortfolioView = () => {
               <KpiCard
                 label="P&L Latent"
                 value={fMAD(globalDashboard?.totalPlLatentMad, true)}
+                trend={parseFloat(globalDashboard?.totalPlLatentMad || 0)}
                 sub="Mark-to-Market non réalisé"
                 topClass={parseFloat(globalDashboard?.totalPlLatentMad || 0) >= 0 ? "kpi-top-green" : "kpi-top-red"}
                 valueColor={pnlColor(globalDashboard?.totalPlLatentMad)}
@@ -2426,6 +2783,7 @@ const PortfolioView = () => {
               <KpiCard
                 label="P&L Réalisé"
                 value={fMAD(globalDashboard?.totalPlRealizedMad, true)}
+                trend={parseFloat(globalDashboard?.totalPlRealizedMad || 0)}
                 sub="Cessions & clôtures"
                 topClass={parseFloat(globalDashboard?.totalPlRealizedMad || 0) >= 0 ? "kpi-top-green" : "kpi-top-red"}
                 valueColor={pnlColor(globalDashboard?.totalPlRealizedMad)}
@@ -2488,16 +2846,16 @@ const PortfolioView = () => {
             const realized = parseFloat(globalDashboard.totalPlRealizedMad || 0);
             const coupons  = parseFloat(globalDashboard.totalCouponsMad    || 0);
             const funding  = parseFloat(globalDashboard.totalFundingCostMad || 0);
-            const computed = latent + realized + coupons - funding;
+            const accounting = latent + realized + coupons; // = P&L Comptable (Excel col. X)
+            const computed = accounting - funding;
             const residual = pnlEco - computed;
             const isBalanced = Math.abs(residual) < Math.max(Math.abs(pnlEco) * 0.005, 10000);
             const items = [
-              { label: "MTM Latent",   val: latent,   color: latent   >= 0 ? "var(--profit)" : "var(--loss)" },
-              { label: "P&L Réalisé",  val: realized,  color: realized >= 0 ? "var(--profit)" : "var(--loss)" },
-              { label: "Coupons YTD",  val: coupons,   color: "var(--cyan)" },
-              { label: "Financement",  val: -funding,  color: "var(--warn)" },
+              { label: "MtM Latent", val: latent,   color: latent   >= 0 ? "var(--profit)" : "var(--loss)" },
+              { label: "Réalisé",    val: realized,  color: realized >= 0 ? "var(--profit)" : "var(--loss)" },
+              { label: "Coupons",    val: coupons,   color: "var(--cyan)" },
             ];
-            const maxAbs = Math.max(...items.map((x) => Math.abs(x.val)), 1);
+            const maxAbs = Math.max(...items.map((x) => Math.abs(x.val)), Math.abs(funding), 1);
             return (
               <div
                 className="card"
@@ -2603,7 +2961,31 @@ const PortfolioView = () => {
                     );
                   })}
 
-                  {/* Résidu FX si non balancé */}
+                  {/* = P&L Comptable (Excel col. X) */}
+                  <div style={{ borderTop: "1px dashed var(--b1)", marginTop: 2, paddingTop: 6, display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.52rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx2)", minWidth: 106, flexShrink: 0 }}>
+                      = P&amp;L Comptable
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.74rem", fontWeight: 700, color: accounting >= 0 ? "var(--profit)" : "var(--loss)", minWidth: 84, textAlign: "right", flexShrink: 0 }}>
+                      {fMAD(accounting, true)}
+                    </span>
+                  </div>
+
+                  {/* − Financement (Excel col. Y) */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.52rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--warn)", minWidth: 106, flexShrink: 0 }}>
+                      − Financement
+                    </span>
+                    <div style={{ flex: 1, height: 5, background: "var(--elev)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${(Math.abs(funding) / maxAbs) * 100}%`, background: "var(--warn)", borderRadius: 3, opacity: 0.65, transition: "width 0.7s ease" }} />
+                    </div>
+                    <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.72rem", fontWeight: 600, color: "var(--warn)", minWidth: 84, textAlign: "right", flexShrink: 0 }}>
+                      {fMAD(-funding, true)}
+                    </span>
+                  </div>
+
+                  {/* Résidu conversion FX si non balancé */}
                   {!isBalanced && (
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <span
@@ -2618,7 +3000,7 @@ const PortfolioView = () => {
                           flexShrink: 0,
                         }}
                       >
-                        ≈ Impact FX
+                        ≈ Écart conversion FX
                       </span>
                       <div style={{ flex: 1 }} />
                       <span
@@ -3210,7 +3592,7 @@ const PortfolioView = () => {
                         fontWeight: 600,
                       }}
                     >
-                      {fUSD(exposureEur / 1e6)}M / {fUSD(limitEur / 1e6)}M EUR
+                      {fUSD(exposureEur / 1e6)}M / {fUSD(effectiveLimitEur / 1e6)}M EUR
                     </span>
                   ) : (
                     <Tag color="warning" style={{ fontSize: "0.60rem" }}>
@@ -3233,28 +3615,26 @@ const PortfolioView = () => {
                 )}
               </div>
 
-              {/* P&L Attribution by asset class */}
-              {globalDashboard?.breakdown &&
-                (() => {
-                  const bd = globalDashboard.breakdown;
+              {/* P&L Attribution by asset class — même source que le donut */}
+              {(() => {
                   const classes = [
                     {
                       key: "EUROBOND",
                       label: "Eurobonds",
                       color: "var(--eb)",
-                      pnl: parseFloat(bd.EUROBOND?.plEcoMad || 0),
+                      pnl: assetBreakdown.EUROBOND.plEcoMad,
                     },
                     {
                       key: "CLN",
                       label: "CLN",
                       color: "var(--cln)",
-                      pnl: parseFloat(bd.CLN?.plEcoMad || 0),
+                      pnl: assetBreakdown.CLN.plEcoMad,
                     },
                     {
                       key: "EGP_BILL",
                       label: "EGP Bills",
                       color: "var(--egp)",
-                      pnl: parseFloat(bd.EGP_BILL?.plEcoMad || 0),
+                      pnl: assetBreakdown.EGP_BILL.plEcoMad,
                     },
                   ].filter((c) => c.pnl !== 0);
                   if (!classes.length) return null;
@@ -3416,26 +3796,27 @@ const PortfolioView = () => {
                   </div>
                 </Card>
 
-                {/* Concentration Top-5 — risque de concentration (haut = risqué) */}
+                {/* VaR 1j 99 % — consommation du budget de risque du desk.
+                    Métrique cœur d'un trader taux (vert < 70 %, ambre 70-100 %). */}
                 {(() => {
-                  const c = concentration.pct;
-                  const cColor = c >= 70 ? "var(--loss)" : c >= 50 ? "var(--warn)" : "var(--profit)";
+                  const vColor =
+                    varPct >= 100 ? "var(--loss)" : varPct >= 70 ? "var(--warn)" : "var(--profit)";
                   return (
                     <Card size="small" styles={{ body: { padding: "10px 6px 8px", textAlign: "center" } }}>
                       <Progress
                         type="dashboard"
                         size={82}
-                        percent={Math.min(Math.round(c), 100)}
-                        strokeColor={cColor}
+                        percent={Math.min(Math.round(varPct), 100)}
+                        strokeColor={vColor}
                         trailColor="rgba(255,255,255,0.06)"
                         format={() => (
-                          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: cColor }}>
-                            {concentration.count > 0 ? `${Math.round(c)}%` : "—"}
+                          <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.78rem", fontWeight: 700, color: vColor }}>
+                            {var1dUsd > 0 ? `${Math.round(varPct)}%` : "—"}
                           </span>
                         )}
                       />
                       <div style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx3)", marginTop: 4 }}>
-                        Concentr. Top-{concentration.top}
+                        VaR 1j / Budget
                       </div>
                     </Card>
                   );
@@ -3466,72 +3847,32 @@ const PortfolioView = () => {
                 })()}
               </div>
 
-              {/* Alertes Carry — Ant Design Alert */}
-              {alerts.length > 0 ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  message={`${alerts.length} position${alerts.length > 1 ? "s" : ""} · Carry négatif`}
-                  style={{ fontSize: "0.68rem", padding: "6px 10px" }}
-                />
-              ) : (
-                <Alert
-                  type="success"
-                  showIcon
-                  message="Alertes Carry — Aucune position négative"
-                  style={{ fontSize: "0.68rem", padding: "6px 10px" }}
-                />
-              )}
+              {/* Pied de panneau informatif — JAMAIS d'alarme ici.
+                  Les alertes carry sont routées vers la cloche de notifications
+                  du bandeau supérieur (TopBar). */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "var(--surf)",
+                  border: "1px solid var(--b1)",
+                }}
+              >
+                <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--tx3)" }}>
+                  VaR 1j · 99 %
+                </span>
+                <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.74rem", fontWeight: 700, color: "var(--tx1)" }}>
+                  {var1dUsd > 0 ? `${fN(var1dUsd / 1000, 0)} K$` : "—"}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* ── Alert Banner ── */}
-          {alerts.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "10px 16px",
-                borderRadius: 8,
-                background: "rgba(255,43,96,0.06)",
-                border: "1px solid rgba(255,43,96,0.20)",
-                flexWrap: "wrap",
-              }}
-            >
-              <AlertTriangle
-                size={14}
-                style={{
-                  color: "var(--loss)",
-                  flexShrink: 0,
-                  animation: "pulse-live 2s ease infinite",
-                }}
-              />
-              <span
-                style={{
-                  fontFamily: "var(--f-disp)",
-                  fontSize: "0.62rem",
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  color: "var(--loss)",
-                }}
-              >
-                {alerts.length} position{alerts.length > 1 ? "s" : ""} carry
-                négatif :
-              </span>
-              <span
-                style={{
-                  fontFamily: "var(--f-body)",
-                  fontSize: "0.72rem",
-                  color: "#FC8FA0",
-                  flex: 1,
-                }}
-              >
-                {alerts.map((a) => a.description || a.isin).join(" · ")}
-              </span>
-            </div>
-          )}
+          {/* Bandeau d'alerte carry retiré de la page d'accueil — les alertes
+              sont désormais centralisées dans la cloche de notifications (TopBar). */}
 
           {/* ── Position Table ── */}
           <div className="card" style={{ overflow: "hidden" }}>
@@ -3608,120 +3949,13 @@ const PortfolioView = () => {
               )}
             </div>
 
-            <div style={{ overflowX: "auto" }}>
-              <table className="dtable">
-                <thead>
-                  <tr>
-                    {[
-                      "ISIN",
-                      "Obligation",
-                      "Type",
-                      "Nominal M",
-                      "Coupon %",
-                      "Échéance",
-                      "WAP Dirty",
-                      "Prix Mkt",
-                      "Perf WAP",
-                      "G-Spread",
-                      "YTM",
-                      "P&L Éco",
-                      "Net Daily",
-                      "Dur.",
-                      "Convexité",
-                      "DV01 $",
-                      "Signal",
-                    ].map((h, i) => (
-                      <th
-                        key={h}
-                        style={{
-                          textAlign:
-                            i === 16
-                              ? "center"
-                              : i >= 3
-                                ? "right"
-                                : i === 2
-                                  ? "center"
-                                  : "left",
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {groups.map((g) => (
-                    <React.Fragment key={g.catKey}>
-                      <CatRow {...g} totalPnl={pnlEco} />
-                      {g.rows.map((r, idx) => (
-                        <PositionRow key={r.isin} r={r} idx={idx} />
-                      ))}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-                {positions.length > 0 && (
-                  <tfoot>
-                    <tr>
-                      <td
-                        colSpan={3}
-                        style={{
-                          textAlign: "left",
-                          fontFamily: "var(--f-disp)",
-                          fontWeight: 700,
-                          fontSize: "0.60rem",
-                          letterSpacing: "0.10em",
-                          textTransform: "uppercase",
-                          color: "var(--tx3)",
-                        }}
-                      >
-                        Total Portefeuille{" "}
-                        <span
-                          style={{
-                            fontFamily: "var(--f-mono)",
-                            color: "var(--cyan)",
-                          }}
-                        >
-                          ({positions.length})
-                        </span>
-                      </td>
-                      <td style={{ color: "var(--tx1)", fontWeight: 600 }}>
-                        {fN(
-                          positions.reduce(
-                            (s, r) => s + parseFloat(r.netNominal || 0),
-                            0,
-                          ) / 1e6,
-                          1,
-                        )}
-                        <span
-                          style={{
-                            color: "var(--tx3)",
-                            fontSize: "0.60rem",
-                            marginLeft: 2,
-                          }}
-                        >
-                          M
-                        </span>
-                      </td>
-                      <td colSpan={5} />
-                      <td />
-                      <td />
-                      <td style={{ color: pnlColor(pnlEco), fontWeight: 700 }}>
-                        {fMAD(pnlEco, true)}
-                      </td>
-                      <td
-                        style={{ color: pnlColor(netDaily), fontWeight: 600 }}
-                      >
-                        {fMAD(netDaily, true)}
-                      </td>
-                      <td />
-                      <td />
-                      <td style={{ color: "#60A5FA" }}>{fN(dv01, 0)}</td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
+            <PositionsTable
+              groups={groups}
+              positions={positions}
+              pnlEco={pnlEco}
+              netDaily={netDaily}
+              dv01={dv01}
+            />
 
             {positions.length === 0 && !loading && (
               <div

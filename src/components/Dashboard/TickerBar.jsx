@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
+import { useGovernance } from "../../contexts/GovernanceContext";
 import { useTrading } from "../../contexts/TradingContext";
+import useLiveDesk from "../../hooks/useLiveDesk";
 
 /* ─── live clock ─────────────────────────────────────────────────── */
 const useClock = () => {
@@ -289,28 +290,8 @@ const HeadlineItem = ({
           <Seg color={C.WARN}>{fMAD(fund) ?? "—"}</Seg>
         </>
       )}
-      {alerts > 0 && (
-        <>
-          {sp}
-          <span
-            style={{
-              background: "rgba(255,43,96,0.22)",
-              border: "1px solid rgba(255,43,96,0.42)",
-              borderRadius: 2,
-              padding: "0 6px",
-              marginLeft: 4,
-              fontFamily: "var(--f-disp)",
-              fontSize: "0.53rem",
-              fontWeight: 800,
-              letterSpacing: "0.10em",
-              color: C.RED,
-              animation: "ticker-blink 1.4s ease infinite",
-            }}
-          >
-            ⚠ {alerts} CARRY NEG
-          </span>
-        </>
-      )}
+      {/* Segment carry négatif retiré du ticker — alertes centralisées dans la
+          cloche de notifications (TopBar). */}
     </span>
   );
 };
@@ -320,7 +301,19 @@ const PositionItem = ({ r }) => {
   const isBuy = r.decision === "BUY";
   const isAlert = r.netDailyAlert;
   const desc = (r.description || "").split(" ").slice(0, 4).join(" ");
-  const pxMid = r.pxMid != null ? (parseFloat(r.pxMid) * 100).toFixed(3) : null;
+  // Ligne déjà enrichie live par useLiveDesk : prix, spreads et carry respirent.
+  const dir = r._dir || 0;
+  const isLive = r._live;
+  const pxMidNum = r.pxMid != null ? parseFloat(r.pxMid) * 100 : null;
+  const pxMid = pxMidNum != null ? pxMidNum.toFixed(3) : null;
+  const pxColor = isLive
+    ? dir > 0
+      ? C.GREEN
+      : dir < 0
+        ? C.RED
+        : C.YELLOW
+    : C.YELLOW;
+  const pxArrow = isLive && dir !== 0 ? (dir > 0 ? "▲" : "▼") : "";
   const gSpread = fBp(r.gSpreadBid);
   const iSpread = fBp(r.iSpreadBid);
   const carry = fMAD(r.netDailyMad);
@@ -364,9 +357,14 @@ const PositionItem = ({ r }) => {
       {pxMid && (
         <>
           <Seg dim> Px </Seg>
-          <Seg color={C.YELLOW} bold>
+          <Seg color={pxColor} bold>
             {pxMid}
           </Seg>
+          {pxArrow && (
+            <span style={{ fontSize: "0.52rem", color: pxColor, lineHeight: 1, marginLeft: 2 }}>
+              {pxArrow}
+            </span>
+          )}
         </>
       )}
       {perf && (
@@ -434,12 +432,47 @@ const FxItem = ({
   suffix = "",
   isRef = false,
 }) => {
-  const n = parseFloat(value);
+  const base = parseFloat(value);
+  const baseRef = useRef(base);
+  const [live, setLive] = useState(base);
+
+  // Re-synchronise sur la vraie valeur quand le backend la met à jour
+  useEffect(() => {
+    baseRef.current = base;
+    if (!isNaN(base)) setLive(base);
+  }, [base]);
+
+  // Micro-simulation intraday : marche aléatoire ±0,06% autour de la vraie
+  // valeur, avec rappel (mean-reversion) pour ne jamais dériver. Effet « live »
+  // purement visuel — n'affecte aucun calcul de P&L. Désactivé si pas de donnée.
+  useEffect(() => {
+    if (isNaN(base) || isRef) return;
+    const id = setInterval(() => {
+      setLive((prev) => {
+        const ref = baseRef.current;
+        const ampl = Math.abs(ref) * 0.0006;
+        let next = prev + (Math.random() - 0.5) * 2 * ampl;
+        next += (ref - next) * 0.15; // rappel vers la vraie valeur
+        return next;
+      });
+    }, 2200);
+    return () => clearInterval(id);
+  }, [base, isRef]);
+
+  const n = isRef ? base : live;
+  const dir = isRef || isNaN(n) ? 0 : n > base ? 1 : n < base ? -1 : 0;
   const display = isNaN(n)
     ? "—"
     : pct
       ? `${(n * 100).toFixed(dec)}%`
       : `${n.toFixed(dec)}${suffix}`;
+  const valColor = isRef
+    ? "#4A7A9A"
+    : dir > 0
+      ? "#16C784"
+      : dir < 0
+        ? "#F6465D"
+        : C.WHITE;
   return (
     <span
       style={{
@@ -452,7 +485,12 @@ const FxItem = ({
       <Seg color={isRef ? "#3A6A8A" : C.CYAN} bold size="0.66rem">
         {pair}
       </Seg>
-      <Seg color={isRef ? "#4A7A9A" : C.WHITE}>{display}</Seg>
+      <Seg color={valColor}>{display}</Seg>
+      {dir !== 0 && (
+        <span style={{ fontSize: "0.52rem", color: valColor, lineHeight: 1 }}>
+          {dir > 0 ? "▲" : "▼"}
+        </span>
+      )}
       {isRef && (
         <span
           style={{
@@ -475,44 +513,22 @@ const FxItem = ({
 const TickerBar = () => {
   const { dashboardRows, globalDashboard, rates, connectionStatus } =
     useTrading();
-  const { user } = useAuth();
+  // Lignes + agrégats ré-évalués en temps réel depuis le flux de marché.
+  const { rows: liveRows, totals: liveTotals } = useLiveDesk();
   const trackRef = useRef(null);
   const [animDur, setAnimDur] = useState(90);
-  const [limitEur, setLimitEur] = useState(280e6);
   const clock = useClock();
 
-  useEffect(() => {
-    const readLimit = () => {
-      try {
-        const raw = localStorage.getItem(`trader_limits_${user?.id}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          const val = parseFloat(parsed?.eurobonds?.limit);
-          if (!isNaN(val) && val > 0) {
-            setLimitEur(val);
-            return;
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-      setLimitEur(280e6);
-    };
-    readLimit();
-    const onUpdate = (e) => {
-      if (!e.detail || e.detail.traderId === user?.id) readLimit();
-    };
-    window.addEventListener("traderLimitsUpdated", onUpdate);
-    return () => window.removeEventListener("traderLimitsUpdated", onUpdate);
-  }, [user?.id]);
+  // Limite eurobonds (EUR absolu) — source unique : useGovernance (piloté admin).
+  const { myEurobondLimit: limitEur } = useGovernance();
 
   const positions = useMemo(
     () =>
-      (dashboardRows || []).filter(
+      (liveRows || []).filter(
         (r) =>
           parseFloat(r.dv01Bond || 0) > 0 || parseFloat(r.netNominal || 0) > 0,
       ),
-    [dashboardRows],
+    [liveRows],
   );
 
   const alerts = useMemo(
@@ -634,7 +650,7 @@ const TickerBar = () => {
         return (
           <HeadlineItem
             key={`h-${i}`}
-            g={globalDashboard}
+            g={liveTotals}
             alerts={alerts}
             posCount={positions.length}
             clock={clock}

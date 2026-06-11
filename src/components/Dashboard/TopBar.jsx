@@ -489,58 +489,8 @@ const TopBar = () => {
           </div>
         </div>
 
-        {/* ── Alert strip ── */}
-        {alerts.length > 0 && (
-          <div
-            style={{
-              padding: "6px 16px",
-              background: "rgba(255,43,96,0.06)",
-              borderTop: "1px solid rgba(255,43,96,0.15)",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <AlertTriangle
-              size={12}
-              style={{
-                color: "var(--loss)",
-                flexShrink: 0,
-                animation: "pulse-live 2s ease infinite",
-              }}
-            />
-            <span
-              style={{
-                fontFamily: "var(--f-disp)",
-                fontSize: "0.60rem",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "var(--loss)",
-              }}
-            >
-              {alerts.length} position{alerts.length > 1 ? "s" : ""} — carry
-              négatif :
-            </span>
-            <span
-              style={{
-                fontFamily: "var(--f-body)",
-                fontSize: "0.72rem",
-                color: "#FC8FA0",
-                flex: 1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {alerts
-                .slice(0, 6)
-                .map((a) => a.description || a.isin)
-                .join(" · ")}
-              {alerts.length > 6 && ` +${alerts.length - 6} autres`}
-            </span>
-          </div>
-        )}
+        {/* Bandeau d'alerte persistant retiré — les alertes carry négatif sont
+            désormais consultables uniquement via la cloche de notifications. */}
       </header>
 
       {/* ── Alerts Dropdown ── */}
@@ -549,7 +499,7 @@ const TopBar = () => {
           style={{
             position: "absolute",
             right: 16,
-            top: alerts.length > 0 ? 76 : 56,
+            top: 56,
             zIndex: 100,
             width: 320,
             background: "var(--elev)",

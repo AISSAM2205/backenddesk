@@ -4,8 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="cac14eae-a805-476f-af3a-5023692d6432" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/desk-international.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/desk-international.iml" afterDir="false" />
+    <list default="true" id="cac14eae-a805-476f-af3a-5023692d6432" name="Changes" comment="chg4">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -120,11 +119,35 @@
       <workItem from="1776673237317" duration="7523000" />
       <workItem from="1776768330923" duration="50826000" />
       <workItem from="1777244496401" duration="30771000" />
-      <workItem from="1780910909927" duration="1312000" />
+      <workItem from="1780910909927" duration="2093000" />
     </task>
+    <task id="LOCAL-00001" summary="chg4">
+      <option name="closed" value="true" />
+      <created>1780912424922</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1780912424922</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="chg4" />
+    <option name="LAST_COMMIT_MESSAGE" value="chg4" />
   </component>
 </project>

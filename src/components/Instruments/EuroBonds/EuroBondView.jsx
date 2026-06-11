@@ -538,13 +538,13 @@ const Row = ({ r, idx }) => {
       </td>
       <td
         style={{ ...nb, color: "var(--tx3)" }}
-        title="G-Spread au 01/01 — référence YTD (Bloomberg)"
+        title="G-Spread de référence — moyenne historique (Bloomberg)"
       >
         {r.gSpreadYtd != null ? fN(r.gSpreadYtd, 1) : "—"}
       </td>
       <td
         style={{ ...nb, color: "var(--tx3)" }}
-        title="I-Spread au 01/01 — référence YTD (Bloomberg)"
+        title="I-Spread de référence — mid courant (Bloomberg)"
       >
         {r.iSpreadYtd != null ? fN(r.iSpreadYtd, 1) : "—"}
       </td>

@@ -40,9 +40,9 @@ html.dark {
   /* ── Semantic colors ── */
   --cyan: #c8910c; /* AWB brand amber — primary accent */
   --aqua: #00caff; /* true cyan-blue — decorative / active states */
-  --profit: #00e899;
-  --loss: #ff2b60;
-  --warn: #ffa500;
+  --profit: #16c784; /* vert profit/hausse — standard terminal salle */
+  --loss: #f6465d;   /* rouge perte/baisse — standard terminal salle */
+  --warn: #ffa500;   /* ambre alerte */
 
   /* ── Instrument colors ── */
   --eb: #1e7fff;
@@ -123,9 +123,9 @@ html.light {
 
   --cyan: #9e6a00;
   --aqua: #0080b5;
-  --profit: #00875a;
-  --loss: #cf1e2b;
-  --warn: #c27a00;
+  --profit: #0e9d66; /* vert profit/hausse — variante claire */
+  --loss: #d62a3d;   /* rouge perte/baisse — variante claire */
+  --warn: #c27a00;   /* ambre alerte */
 
   --eb: #1460cc;
   --cln: #7b2cc0;
@@ -341,6 +341,36 @@ body {
 }
 .tick-down {
   animation: tick-down 0.8s ease forwards;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   POSITIONS TABLE (Ant Design) — habillage desk
+   ═══════════════════════════════════════════════════════════════════ */
+.positions-antd-table .ant-table {
+  background: transparent;
+}
+.positions-antd-table .ant-table-thead > tr > th {
+  font-family: var(--f-disp);
+  font-size: 0.53rem !important;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--tx3);
+  border-bottom: 1px solid var(--b1) !important;
+}
+.positions-antd-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--b0) !important;
+}
+.positions-antd-table .pos-even-row > td.ant-table-cell {
+  background: var(--tr-even-bg);
+}
+.positions-antd-table .pos-alert-row > td.ant-table-cell {
+  background: rgba(255, 43, 96, 0.04);
+}
+/* Ligne total (summary) — pinnée en bas, liseré haut */
+.positions-antd-table .ant-table-summary > tr > td {
+  background: var(--surf);
+  border-top: 2px solid var(--b1) !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

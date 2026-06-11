@@ -31,5 +31,12 @@ public interface PricingConfigRepository extends JpaRepository<PricingConfig, Lo
 
     // 3. Dernier snapshot de pricing pour un ISIN — utilisé par le PATCH /decision
     Optional<PricingConfig> findTopByInstrumentIsinOrderByConfigDateDesc(String isin);
+
+    // 4. Tous les pricings de la date la plus récente — fallback résilient
+    //    (évite SIGNAL/G-Spread vides si l'app tourne un jour postérieur au seed)
+    @Query("SELECT p FROM PricingConfig p WHERE p.configDate = " +
+           "(SELECT MAX(p2.configDate) FROM PricingConfig p2) " +
+           "ORDER BY p.instrument.isin")
+    List<PricingConfig> findLatest();
 }
 

@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
+import api from "../../../services/api";
 import {
   TrendingUp,
   RefreshCw,
@@ -57,7 +58,7 @@ const SortIcon = ({ active, dir }) => {
 };
 
 const FuturesView = () => {
-  const { dashboardRows, riskData, loading, refresh, selectedDate } =
+  const { dashboardRows, riskData, rates, loading, refresh, selectedDate } =
     useTrading();
   const [sortKey, setSortKey] = useState("dv01Bond");
   const [sortDir, setSortDir] = useState("desc");
@@ -70,6 +71,55 @@ const FuturesView = () => {
     }
   };
 
+  /* Book futures RÉEL — récupéré directement depuis la table trade.
+     (le dashboard/v_position ne contient que des obligations, jamais les futures) */
+  const [futuresTrades, setFuturesTrades] = useState([]);
+  useEffect(() => {
+    api.trades
+      .getAll()
+      .then((res) =>
+        setFuturesTrades(
+          (res.data || []).filter(
+            (t) =>
+              !t.isClosed &&
+              (t.subAsset || "").toLowerCase().includes("future"),
+          ),
+        ),
+      )
+      .catch(() => setFuturesTrades([]));
+  }, [selectedDate]);
+
+  /* Agrégation par obligation couverte : contrats nets + MtM converti en MAD */
+  const futuresByBond = useMemo(() => {
+    const usdMad = parseFloat(rates?.usdMad) || 10.0347;
+    const eurMad = parseFloat(rates?.eurMad) || 10.8891;
+    const map = {};
+    (futuresTrades || []).forEach((t) => {
+      const isin = t.hedBondIsin;
+      if (!isin) return;
+      const n = parseInt(t.nbContracts, 10) || 0;
+      const signed = (t.way === "SELL" ? -1 : 1) * n;
+      // Bund/Bobl/Schatz (RX/OE/DU) + OAT/BTP en EUR, Treasuries (FV/TY/US) en USD
+      const tkr = (t.assetIdentifier || "").toUpperCase();
+      const fx = /^(RX|OE|DU|IK|OAT)/.test(tkr) ? eurMad : usdMad;
+      const mtmMad = (parseFloat(t.mtmPnl) || 0) * fx;
+      if (!map[isin]) map[isin] = { net: 0, mtmMad: 0 };
+      map[isin].net += signed;
+      map[isin].mtmMad += mtmMad;
+    });
+    return map;
+  }, [futuresTrades, rates]);
+
+  const futuresBook = useMemo(() => {
+    let net = 0,
+      mtmMad = 0;
+    Object.values(futuresByBond).forEach((v) => {
+      net += v.net;
+      mtmMad += v.mtmMad;
+    });
+    return { net, mtmMad };
+  }, [futuresByBond]);
+
   /* Bonds that have a hedge future assigned */
   const hedged = useMemo(() => {
     const riskMap = {};
@@ -81,15 +131,41 @@ const FuturesView = () => {
         const sub = (r.subAsset || "").toLowerCase();
         return !sub.includes("future") && r.hedgeFuture;
       })
-      .map((r) => ({ ...r, ...(riskMap[r.isin] || {}) }));
-  }, [dashboardRows, riskData]);
+      .map((r) => {
+        const merged = { ...r, ...(riskMap[r.isin] || {}) };
+        // Position futures RÉELLE (depuis la table trade) — source de vérité
+        const fb = futuresByBond[r.isin];
+        if (fb) {
+          merged.currentFuturesPosition = fb.net;
+          merged.futuresMtmMad = fb.mtmMad;
+        }
+        return merged;
+      });
+  }, [dashboardRows, riskData, futuresByBond]);
 
   /* Pure futures positions (subAsset contains "future") */
+  // Lignes de la table "Positions Futures Actives" = vrais contrats futures
   const futureRows = useMemo(() => {
-    return (dashboardRows || []).filter((r) =>
-      (r.subAsset || "").toLowerCase().includes("future"),
-    );
-  }, [dashboardRows]);
+    const usdMad = parseFloat(rates?.usdMad) || 10.0347;
+    const eurMad = parseFloat(rates?.eurMad) || 10.8891;
+    return (futuresTrades || []).map((t) => {
+      const tkr = (t.assetIdentifier || "").toUpperCase();
+      const fx = /^(RX|OE|DU|IK|OAT)/.test(tkr) ? eurMad : usdMad;
+      const n = parseInt(t.nbContracts, 10) || 0;
+      const signed = (t.way === "SELL" ? -1 : 1) * n;
+      const mtmMad = (parseFloat(t.mtmPnl) || 0) * fx;
+      return {
+        isin: t.assetIdentifier,
+        description: t.assetIdentifier,
+        subAsset: t.subAsset || "Future",
+        futuresNetPosition: signed,
+        pnlEconomicMad: mtmMad,
+        pnlAccountingMad: mtmMad,
+        netDailyMad: 0,
+        maturityDate: t.valueDate || t.maturityDate,
+      };
+    });
+  }, [futuresTrades, rates]);
 
   const sorted = useMemo(() => {
     const arr = [...hedged];
@@ -118,23 +194,17 @@ const FuturesView = () => {
     [sorted],
   );
 
+  // P&L du book futures = MtM réel (les futures n'ont pas de carry → net daily 0)
   const futTotals = useMemo(
-    () =>
-      futureRows.reduce(
-        (acc, r) => ({
-          pnlEco: acc.pnlEco + parseFloat(r.pnlEconomicMad || 0),
-          pnlAcct: acc.pnlAcct + parseFloat(r.pnlAccountingMad || 0),
-          netDaily: acc.netDaily + parseFloat(r.netDailyMad || 0),
-        }),
-        { pnlEco: 0, pnlAcct: 0, netDaily: 0 },
-      ),
-    [futureRows],
+    () => ({
+      pnlEco: futuresBook.mtmMad,
+      pnlAcct: futuresBook.mtmMad,
+      netDaily: 0,
+    }),
+    [futuresBook],
   );
 
-  const totalNetPos = futureRows.reduce(
-    (s, r) => s + (parseInt(r.futuresNetPosition, 10) || 0),
-    0,
-  );
+  const totalNetPos = futuresBook.net;
 
   const hedgeCoverage = useMemo(() => {
     const totalCurrent = sorted.reduce(

@@ -30,8 +30,13 @@ public class PricingService {
      *  OCPMR 6.1  : G=202.89 > Target=134.54 → BUY
      */
     public List<PricingDto> computeBuyHoldDecisions(LocalDate date) {
-        return pricingRepo.findByConfigDate(date)
-                .stream().map(this::compute).collect(Collectors.toList());
+        // Date exacte, sinon fallback sur le dernier snapshot disponible
+        // (sinon SIGNAL / G-Spread vides dès que l'app tourne après le jour du seed)
+        List<PricingConfig> configs = pricingRepo.findByConfigDate(date);
+        if (configs.isEmpty()) {
+            configs = pricingRepo.findLatest();
+        }
+        return configs.stream().map(this::compute).collect(Collectors.toList());
     }
 
     public PricingDto computeForIsin(String isin, LocalDate date) {
@@ -49,11 +54,17 @@ public class PricingService {
                     .divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
         }
 
-        // Décision : G-Spread BID > Target → BUY
-        String decision = "HOLD";
-        if (cfg.getGSpreadBid() != null && cfg.getTargetSpread() != null) {
-            decision = cfg.getGSpreadBid().compareTo(cfg.getTargetSpread()) > 0
-                    ? "BUY" : "HOLD";
+        // Décision : on RESPECTE le signal stocké (choix manuel du trader via
+        // le dropdown, ou valeur seedée). On ne recalcule depuis les spreads
+        // QUE si aucun signal n'est stocké — sinon le choix manuel serait écrasé
+        // à chaque refresh.
+        String decision = cfg.getDecision();
+        if (decision == null || decision.isBlank()) {
+            decision = "HOLD";
+            if (cfg.getGSpreadBid() != null && cfg.getTargetSpread() != null) {
+                decision = cfg.getGSpreadBid().compareTo(cfg.getTargetSpread()) > 0
+                        ? "BUY" : "HOLD";
+            }
         }
 
         return PricingDto.builder()

@@ -9,7 +9,9 @@ import {
 import { ConfigProvider } from "antd";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AdminProvider } from "./contexts/AdminContext";
+import { GovernanceProvider } from "./contexts/GovernanceContext";
 import { TradingProvider } from "./contexts/TradingContext";
+import { MarketDataProvider } from "./contexts/MarketDataContext";
 import ErrorBoundary from "./components/Common/ErrorBoundary";
 import LoadingSpinner from "./components/Common/LoadingSpinner";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
@@ -129,11 +131,15 @@ const AppRoutes = () => {
         path="/trader/*"
         element={
           <ProtectedRoute requiredRole="trader">
-            <TradingProvider>
-              <Suspense fallback={<LoadingSpinner />}>
-                <TradingDashboard />
-              </Suspense>
-            </TradingProvider>
+            <GovernanceProvider>
+              <TradingProvider>
+                <MarketDataProvider>
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <TradingDashboard />
+                  </Suspense>
+                </MarketDataProvider>
+              </TradingProvider>
+            </GovernanceProvider>
           </ProtectedRoute>
         }
       />

@@ -1,6 +1,7 @@
 import { Client } from "@stomp/stompjs";
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+// Backend Spring Boot écoute sur 8081 (cf. application.properties + proxy Vite).
+const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8081";
 const WS_URL = BASE.replace(/^http/, "ws") + "/ws";
 
 class WsService {
@@ -23,12 +24,26 @@ class WsService {
       onConnect: () => {
         this.connected = true;
         this._emit({ type: "CONNECTION_STATUS", status: "connected" });
+
+        // Heartbeat : déclenche un rafraîchissement des agrégats lourds (REST).
         this.client.subscribe("/topic/heartbeat", (message) => {
           try {
             const data = JSON.parse(message.body);
             this._emit({ type: "DATA", payload: data });
           } catch {
             this._emit({ type: "DATA", payload: {} });
+          }
+        });
+
+        // Flux de marché : lot de ticks Bid/Ask/Last à haute fréquence.
+        // Émis comme événement "MARKET" distinct → consommé par MarketDataContext
+        // sans recharger les agrégats (mise à jour purement incrémentale).
+        this.client.subscribe("/topic/market", (message) => {
+          try {
+            const ticks = JSON.parse(message.body);
+            this._emit({ type: "MARKET", payload: ticks });
+          } catch {
+            /* ignore tick malformé */
           }
         });
       },

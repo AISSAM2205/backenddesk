@@ -22,54 +22,95 @@ import wsService from "../services/wsService";
 
 const TradingContext = createContext();
 
-/* ─── Client-side carry enrichment ──────────────────────────────
-   Si le backend renvoie cpnThetaMad / dailyFundingMad = 0,
-   on les calcule : CpnTheta = coupon%/365 × nominal × FX
-                    DailyFunding = SOFR|ESTR/360 × nominal × FX
-──────────────────────────────────────────────────────────────── */
+/* ─── Consolidation P&L + carry (source de vérité côté client) ───────
+   On recalcule TOUT en MAD de façon cohérente, à partir des briques que
+   chaque ligne fournit (MtM latent, coupon, financement), pour éviter :
+   - les unités EGP cassées (netNominal est ABSOLU, pas en millions),
+   - le carry « coupon − financement » qui rend tout négatif,
+   - les coupons YTD non agrégés (desk en fausse perte).
+
+   Modèle pro :
+   • FX par devise : USD→usdMad, EUR→eurMad, EGP→usdMad/usdEgp
+   • Financement repo : SOFR (USD) / ESTR (EUR) / 0 (EGP T-bills self-funded)
+   • Carry journalier = RENDEMENT (YTM) − financement  (base rendement, pas coupon)
+   • P&L éco YTD = MtM latent + réalisé + coupons courus YTD − financement YTD
+──────────────────────────────────────────────────────────────────── */
 function enrichCarry(rows, ratesData) {
   const n = (v) => parseFloat(v ?? 0);
-  const usdMad = n(ratesData?.usdMad) || 9.251;
-  const eurMad = n(ratesData?.eurMad) || 10.418;
-  const sofr = n(ratesData?.sofr) || 4.3;
-  const estr = n(ratesData?.estr) || 2.17;
+  const usdMad = n(ratesData?.usdMad) || 10.0347;
+  const eurMad = n(ratesData?.eurMad) || 10.8891;
+  const usdEgp = n(ratesData?.usdEgp) || 48.85;
+  const sofr = n(ratesData?.sofr) || 5.33;
+  const estr = n(ratesData?.estr) || 3.9;
 
-  // Remaining trading days to Dec 31 (used for EoY P&L projection)
   const _now = new Date();
+  const _soy = new Date(_now.getFullYear(), 0, 1);
   const _eoy = new Date(_now.getFullYear(), 11, 31);
+  const elapsedDays = Math.max(1, Math.round((_now - _soy) / 86400000));
   const remainDaysYe = Math.max(0, Math.ceil((_eoy - _now) / 86400000));
 
   return rows.map((r) => {
-    const isEur = (r.currency || "").toUpperCase() === "EUR";
-    const fx = isEur ? eurMad : usdMad;
-    const fundRate = isEur ? estr : sofr;
-    const nominal = n(r.netNominal) * 1e6; // netNominal stocké en millions
+    const ccy = (r.currency || "USD").toUpperCase();
+    const isEur = ccy === "EUR";
+    const isEgp = ccy === "EGP";
+    // FX devise → MAD
+    const fx = isEur ? eurMad : isEgp ? usdMad / usdEgp : usdMad;
+    // Coût de financement repo (les T-bills EGP ne sont pas reposés → 0)
+    const fundRate = isEgp ? 0 : isEur ? estr : sofr;
+    const nominal = Math.abs(n(r.netNominal)); // ABSOLU (pas ×1e6)
+    // Rendement porté : YTM si dispo, sinon coupon comme proxy
+    const ytm = n(r.yieldToMaturity) || n(r.couponRate);
 
-    let cpnThetaMad = n(r.cpnThetaMad);
-    let dailyFundingMad = n(r.dailyFundingMad);
-    let fundingCostMad = n(r.fundingCostMad);
-
-    if (cpnThetaMad === 0 && n(r.couponRate) > 0 && nominal > 0) {
-      cpnThetaMad = (((n(r.couponRate) / 100) * nominal) / 365) * fx;
-    }
-    if (dailyFundingMad === 0 && nominal > 0) {
-      dailyFundingMad = (((fundRate / 100) * nominal) / 360) * fx;
-    }
-    if (fundingCostMad === 0 && dailyFundingMad > 0) {
-      fundingCostMad = dailyFundingMad;
-    }
-
-    const netDailyMad = cpnThetaMad - dailyFundingMad;
+    // ── Carry journalier (base rendement) ──────────────────────────
+    // Theta = accrual de RENDEMENT (YTM), pas seulement le coupon cash. Ainsi
+    // Theta − Financement = Net Daily se réconcilie partout (table + attribution),
+    // et les obligations décotées (coupon bas, yield haut) ne sont plus à tort
+    // en carry négatif.
+    const cpnThetaMad = ((ytm / 100) * nominal) / 365 * fx;          // accrual rendement/j
+    const dailyFundingMad = ((fundRate / 100) * nominal) / 360 * fx; // repo/j
+    const netDailyMad = cpnThetaMad - dailyFundingMad;              // carry net/j
     const netDailyAlert = netDailyMad < 0;
 
-    // Projection P&L Éco fin d'année = P&L actuel + carry net × jours restants
-    const expectedEcoPnlYe = n(r.pnlEconomicMad) + netDailyMad * remainDaysYe;
+    // ── P&L économique YTD cohérent ────────────────────────────────
+    const latentMad = n(r.pnlLatentCcy) * fx;
+    const realizedMad = n(r.pnlRealizedCcy) * fx;
+    const couponsYtdMad = ((n(r.couponRate) / 100) * nominal) * (elapsedDays / 365) * fx;
+    const fundingYtdMad = ((fundRate / 100) * nominal) * (elapsedDays / 360) * fx;
+    const pnlAccountingMad = latentMad + realizedMad + couponsYtdMad;
+    const pnlEconomicMad = pnlAccountingMad - fundingYtdMad;
+
+    // Coupons courus EN DEVISE (colonnes CCY) + P&L Total CCY cohérent
+    const couponsCcy = ((n(r.couponRate) / 100) * nominal) * (elapsedDays / 365);
+    const totalPnlCcy =
+      n(r.pnlLatentCcy) + n(r.pnlRealizedCcy) + couponsCcy;
+    // Références de spread YTD : valeur backend si dispo, sinon dérivée réelle
+    // (moyenne historique pour le G-Spread, I-Spread mid courant) — jamais vide
+    const gSpreadYtd = r.gSpreadYtd ?? r.historicalAvgSpread ?? r.gSpreadMid ?? null;
+    const iSpreadYtd = r.iSpreadYtd ?? r.iSpreadMid ?? r.iSpreadBid ?? null;
+
+    const expectedEcoPnlYe = pnlEconomicMad + netDailyMad * remainDaysYe;
+
+    // Nominal converti en USD (pour un total homogène, EGP/EUR compris)
+    const netNominalUsd = (nominal * fx) / usdMad;
 
     return {
       ...r,
+      netNominalUsd,
+      // briques MAD (pour une consolidation cohérente en aval)
+      pnlLatentMad: latentMad,
+      pnlRealizedMad: realizedMad,
+      couponsMad: couponsYtdMad,
+      fundingCostMad: fundingYtdMad,
+      pnlAccountingMad,
+      pnlEconomicMad,
+      // colonnes CCY + références spread (remplissent les colonnes vides)
+      couponsCcy,
+      totalPnlCcy,
+      gSpreadYtd,
+      iSpreadYtd,
+      // carry journalier
       cpnThetaMad,
       dailyFundingMad,
-      fundingCostMad,
       netDailyMad,
       netDailyAlert,
       expectedEcoPnlYe,
@@ -86,7 +127,7 @@ function enrichCarry(rows, ratesData) {
 function computeGlobal(rows) {
   const n = (v) => parseFloat(v ?? 0);
 
-  // ── Totals in MAD (PnlService already converts to MAD) ──────────
+  // ── Totals in MAD (enrichCarry a déjà tout converti en MAD) ─────
   const totalPlEcoMad = rows.reduce((s, r) => s + n(r.pnlEconomicMad), 0);
   const totalPnlAccountingMad = rows.reduce(
     (s, r) => s + n(r.pnlAccountingMad),
@@ -96,11 +137,15 @@ function computeGlobal(rows) {
   const totalNetDailyMad = rows.reduce((s, r) => s + n(r.netDailyMad), 0);
   const totalCpnThetaMad = rows.reduce((s, r) => s + n(r.cpnThetaMad), 0);
 
-  // ── Totals in bond CCY (USD / EUR) ───────────────────────────────
-  const totalNominalUsd = rows.reduce((s, r) => s + n(r.netNominal), 0);
-  const totalPlLatentCcy = rows.reduce((s, r) => s + n(r.pnlLatentCcy), 0);
-  const totalPlRealizedCcy = rows.reduce((s, r) => s + n(r.pnlRealizedCcy), 0);
-  const totalCouponsCcy = rows.reduce((s, r) => s + n(r.couponsCcy), 0);
+  // ── P&L Latent / Coupons : désormais en MAD (briques d'enrichCarry) ─
+  // Fallback sur les champs CCY backend si enrichCarry n'a pas tourné.
+  const totalPlLatentMad = rows.reduce((s, r) => s + n(r.pnlLatentMad ?? r.pnlLatentCcy), 0);
+  const totalPlRealizedMad = rows.reduce((s, r) => s + n(r.pnlRealizedMad ?? r.pnlRealizedCcy), 0);
+  const totalCouponsMad = rows.reduce((s, r) => s + n(r.couponsMad ?? r.couponsCcy), 0);
+
+  // ── Totals ───────────────────────────────────────────────────────
+  // Nominal homogène en USD (EGP/EUR convertis ; fallback netNominal brut)
+  const totalNominalUsd = rows.reduce((s, r) => s + n(r.netNominalUsd ?? r.netNominal), 0);
   const totalDv01Usd = rows.reduce((s, r) => s + n(r.dv01Bond), 0);
 
   // ── Portfolio duration (nominal-weighted average) ────────────────
@@ -138,9 +183,9 @@ function computeGlobal(rows) {
     // Fields matching GlobalDashboardDto naming convention
     totalPlEcoMad,
     totalNominalMad: totalNominalUsd, // USD (named Mad for API compat)
-    totalPlLatentMad: totalPlLatentCcy, // CCY
-    totalPlRealizedMad: totalPlRealizedCcy, // CCY
-    totalCouponsMad: totalCouponsCcy, // CCY
+    totalPlLatentMad, // MAD
+    totalPlRealizedMad, // MAD
+    totalCouponsMad, // MAD
     totalPnlAccountingMad,
     totalFundingCostMad,
     totalNetDailyMad,
@@ -262,16 +307,19 @@ export const TradingProvider = ({ children }) => {
       const rows = enrichCarry(rawRows, ratesData);
       dispatch({ type: "SET_DASHBOARD_ROWS", payload: rows });
 
-      // ── Global dashboard: real endpoint OR compute from rows ─────
-      if (globalRes.status === "fulfilled" && globalRes.value.data) {
-        dispatch({
-          type: "SET_GLOBAL_DASHBOARD",
-          payload: globalRes.value.data,
-        });
-      } else if (rows.length > 0) {
+      // ── Global dashboard ─────────────────────────────────────────
+      // On privilégie la consolidation client-side (computeGlobal sur les
+      // lignes enrichies) : cohérente en MAD, coupons inclus, multi-classe.
+      // L'agrégat backend ne sert que de filet si aucune ligne n'est dispo.
+      if (rows.length > 0) {
         dispatch({
           type: "SET_GLOBAL_DASHBOARD",
           payload: computeGlobal(rows),
+        });
+      } else if (globalRes.status === "fulfilled" && globalRes.value.data) {
+        dispatch({
+          type: "SET_GLOBAL_DASHBOARD",
+          payload: globalRes.value.data,
         });
       }
 
@@ -294,10 +342,7 @@ export const TradingProvider = ({ children }) => {
         dispatch({ type: "SET_DURATION", payload: durationRes.value.data });
         // Also update globalDashboard.portfolioDuration with the precise value
         if (rows.length > 0) {
-          const g =
-            globalRes.status === "fulfilled" && globalRes.value.data
-              ? globalRes.value.data
-              : computeGlobal(rows);
+          const g = computeGlobal(rows);
           dispatch({
             type: "SET_GLOBAL_DASHBOARD",
             payload: {

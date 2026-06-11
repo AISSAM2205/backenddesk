@@ -517,11 +517,22 @@ public class BloombergMockDataLoader implements ApplicationRunner {
         List<LocalDate> days = businessDays(today.minusDays(1), 30);
         List<PnlDaily> records = new ArrayList<>();
 
-        BigDecimal base     = new BigDecimal("14000000");  // 14M MAD
-        BigDecimal dailyInc = new BigDecimal("600000");    // +600K/day trend
+        // Random-walk reproductible : dérive haussière + volatilité quotidienne.
+        // Graine fixe → même courbe à chaque seed (démo stable, mais réaliste
+        // avec des replis, contrairement à l'ancienne droite parfaite +600k/j).
+        Random rng = new Random(20260609L);
+        final double base  = 14_000_000d; // P&L éco de départ (MAD)
+        final double trend = 600_000d;    // dérive moyenne par jour ouvré
+        final double vol   = 1_100_000d;  // volatilité quotidienne (écart-type)
+        double cum = base;
 
         for (int i = 0; i < days.size(); i++) {
-            BigDecimal pnlEco  = base.add(dailyInc.multiply(BigDecimal.valueOf(i)));
+            // P&L du jour = tendance + choc gaussien (jour 0 = base, sans choc)
+            double dayPnl = (i == 0) ? 0d : trend + rng.nextGaussian() * vol;
+            cum += dayPnl;
+
+            BigDecimal pnlEco  = BigDecimal.valueOf(Math.round(cum));
+            BigDecimal pnlJour = BigDecimal.valueOf(Math.round(i == 0 ? trend : dayPnl));
             int doy = days.get(i).getDayOfYear();
 
             BigDecimal finUsd  = new BigDecimal("109000").multiply(BigDecimal.valueOf(doy));
@@ -531,7 +542,7 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             records.add(PnlDaily.builder()
                     .snapshotDate(days.get(i))
                     .pnlEcoMad(pnlEco)
-                    .pnlJourMad(dailyInc)
+                    .pnlJourMad(pnlJour)
                     .pnlTotalGestionMad(pnlEco.add(finTot))
                     .positionUsd(new BigDecimal("109460000"))
                     .positionEurUsd(new BigDecimal("16590000"))

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useTrading } from "../../contexts/TradingContext";
 import { useAuth } from "../../contexts/AuthContext";
+import useLiveDesk from "../../hooks/useLiveDesk";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -17,6 +18,7 @@ import {
   AlertTriangle,
   Tag,
   FileText,
+  Radio,
 } from "lucide-react";
 
 /* ─── Data ──────────────────────────────────────────────────── */
@@ -43,6 +45,13 @@ const NAV_GROUPS = [
   {
     label: "Marchés",
     items: [
+      {
+        id: "marketlive",
+        label: "Marché Live",
+        icon: Radio,
+        accent: "var(--profit)",
+        sub: "Bid/Ask/Last · WebSocket",
+      },
       {
         id: "eurobonds",
         label: "Market Watch",
@@ -439,10 +448,14 @@ const Sidebar = () => {
   );
 
   /* Derived data */
+  const { totals: liveTotals } = useLiveDesk();
   const alertCount = (dashboardRows || []).filter(
     (r) => r.netDailyAlert,
   ).length;
-  const pnlEco = parseFloat(globalDashboard?.totalPlEcoMad || 0);
+  // P&L live (respire avec les prix) ; repli sur l'agrégat REST.
+  const pnlEco = parseFloat(
+    liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
+  );
   const pnlPos = pnlEco >= 0;
   const pnlStr = fCompact(pnlEco);
 
@@ -599,31 +612,8 @@ const Sidebar = () => {
             MAD
           </span>
         </div>
-        {alertCount > 0 && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              marginTop: 6,
-              paddingTop: 6,
-              borderTop: "1px solid rgba(255,43,96,0.12)",
-            }}
-          >
-            <AlertTriangle size={9} style={{ color: "var(--loss)" }} />
-            <span
-              style={{
-                fontFamily: "var(--f-disp)",
-                fontSize: "0.53rem",
-                fontWeight: 700,
-                color: "var(--loss)",
-                letterSpacing: "0.06em",
-              }}
-            >
-              {alertCount} CARRY NÉGATIF
-            </span>
-          </div>
-        )}
+        {/* Ligne carry négatif retirée — alertes centralisées dans la cloche
+            de notifications (TopBar). */}
       </div>
 
       {/* ── Navigation ── */}

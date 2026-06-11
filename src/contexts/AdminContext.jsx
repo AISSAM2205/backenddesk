@@ -8,6 +8,23 @@ import React, {
 } from "react";
 import { useAuth } from "./AuthContext";
 import api from "../services/api";
+import {
+  PORTFOLIO_LIMITS_DEFAULT,
+  LS_PORTFOLIO_LIMITS,
+  DEFAULT_EUROBOND_LIMIT_EUR,
+} from "../config/governanceDefaults";
+
+/* Lit le snapshot localStorage (écrit par l'admin, consommé par le trader). */
+const readLimitsSnapshotAdmin = () => {
+  try {
+    const raw = localStorage.getItem(LS_PORTFOLIO_LIMITS);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch {
+    return null;
+  }
+};
 
 const AdminContext = createContext();
 
@@ -78,9 +95,27 @@ export const AdminProvider = ({ children }) => {
     // ── Portfolio limits + annual targets ────────────────────────────
     try {
       const res = await api.admin.getPortfolioLimits();
-      dispatch({ type: "SET_PORTFOLIO_LIMITS", payload: res.data || [] });
+      const rows = res.data || [];
+      dispatch({ type: "SET_PORTFOLIO_LIMITS", payload: rows });
+      // Snapshot pour que les écrans trader (route séparée) lisent les vraies
+      // limites admin même sans backend persistant — cf. GovernanceContext.
+      if (rows.length) {
+        try {
+          localStorage.setItem(LS_PORTFOLIO_LIMITS, JSON.stringify(rows));
+        } catch {
+          /* quota / private mode → ignore */
+        }
+      }
     } catch {
-      /* non-critical */
+      // Backend absent → repli sur snapshot localStorage puis défauts.
+      // L'admin peut ainsi voir ET éditer les limites même en démo sans backend.
+      const snap = readLimitsSnapshotAdmin() || PORTFOLIO_LIMITS_DEFAULT;
+      dispatch({ type: "SET_PORTFOLIO_LIMITS", payload: snap });
+      if (!readLimitsSnapshotAdmin()) {
+        try {
+          localStorage.setItem(LS_PORTFOLIO_LIMITS, JSON.stringify(PORTFOLIO_LIMITS_DEFAULT));
+        } catch { /* ignore */ }
+      }
     }
 
     // ── Audit log ────────────────────────────────────────────────────
@@ -95,7 +130,7 @@ export const AdminProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && user?.role === "ADMIN") {
+    if (isAuthenticated && user?.role?.toUpperCase() === "ADMIN") {
       loadAdminData();
     }
   }, [isAuthenticated, user, loadAdminData]);
@@ -168,9 +203,33 @@ export const AdminProvider = ({ children }) => {
   // ── Portfolio limit update ────────────────────────────────────────
 
   const updatePortfolioLimit = async (id, dto) => {
-    await api.admin.updatePortfolioLimit(id, dto);
-    const res = await api.admin.getPortfolioLimits();
-    dispatch({ type: "SET_PORTFOLIO_LIMITS", payload: res.data || [] });
+    // 1. Mise à jour optimiste locale — fonctionne même sans backend (mode démo).
+    //    Garantit que le tableau trader se met à jour IMMÉDIATEMENT après la
+    //    sauvegarde admin, que le backend soit disponible ou non.
+    const optimistic = state.portfolioLimits.map((l) =>
+      l.id === id ? { ...l, ...dto } : l,
+    );
+    dispatch({ type: "SET_PORTFOLIO_LIMITS", payload: optimistic });
+    try {
+      localStorage.setItem(LS_PORTFOLIO_LIMITS, JSON.stringify(optimistic));
+    } catch { /* ignore */ }
+    window.dispatchEvent(new CustomEvent("portfolioLimitsUpdated"));
+
+    // 2. Persistance backend (best-effort : si absent, la mise à jour locale reste).
+    try {
+      await api.admin.updatePortfolioLimit(id, dto);
+      const res = await api.admin.getPortfolioLimits();
+      const rows = res.data || [];
+      if (rows.length) {
+        dispatch({ type: "SET_PORTFOLIO_LIMITS", payload: rows });
+        try {
+          localStorage.setItem(LS_PORTFOLIO_LIMITS, JSON.stringify(rows));
+        } catch { /* ignore */ }
+        window.dispatchEvent(new CustomEvent("portfolioLimitsUpdated"));
+      }
+    } catch {
+      // Backend absent — l'état local (optimiste) est déjà correct.
+    }
   };
 
   // ── Derived selectors ─────────────────────────────────────────────

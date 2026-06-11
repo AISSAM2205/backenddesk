@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
+import { useGovernance } from "../../../contexts/GovernanceContext";
 import { AlertTriangle, TrendingUp, DollarSign, RefreshCw } from "lucide-react";
 import api from "../../../services/api";
 
@@ -28,75 +29,6 @@ const fN = (v, d = 3) =>
   v == null || isNaN(v) ? "—" : parseFloat(v).toFixed(d);
 const pCol = (v) => (parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)");
 
-/* ─── Données fallback (affichées si le backend n'est pas encore disponible) ── */
-const FALLBACK_TBILLS = [
-  {
-    id: "T-USD-1",
-    isin: "US912796ZT70",
-    emetteur: "US Treasury",
-    nominal: 50e6,
-    devise: "USD",
-    yieldNet: 5.42,
-    yieldBrut: 5.85,
-    duration: 0.25,
-    plYieldUsd: 680000,
-    plFxUsd: -45000,
-    plEcoUsd: 635000,
-    fundingUsd: -210000,
-    fxMoyen: 9.92,
-    fxCurrent: 10.035,
-    fxBreakevenAvec: 9.785,
-    fxBreakevenSans: 9.83,
-    fxStopLoss: 9.5,
-    maturityDate: "2025-06-17",
-    dateInitiation: "2024-12-17",
-    limitNominal: 100e6,
-  },
-  {
-    id: "T-USD-2",
-    isin: "US912796YH08",
-    emetteur: "US Treasury",
-    nominal: 30e6,
-    devise: "USD",
-    yieldNet: 5.28,
-    yieldBrut: 5.7,
-    duration: 0.5,
-    plYieldUsd: 396000,
-    plFxUsd: -28000,
-    plEcoUsd: 368000,
-    fundingUsd: -126000,
-    fxMoyen: 9.875,
-    fxCurrent: 10.035,
-    fxBreakevenAvec: 9.735,
-    fxBreakevenSans: 9.79,
-    fxStopLoss: 9.5,
-    maturityDate: "2025-09-15",
-    dateInitiation: "2024-09-15",
-    limitNominal: 100e6,
-  },
-  {
-    id: "T-EUR-1",
-    isin: "FR0013519668",
-    emetteur: "Trésor Français (BTF)",
-    nominal: 20e6,
-    devise: "EUR",
-    yieldNet: 3.15,
-    yieldBrut: 3.8,
-    duration: 0.25,
-    plYieldUsd: 157500,
-    plFxUsd: 12000,
-    plEcoUsd: 169500,
-    fundingUsd: -63000,
-    fxMoyen: 10.65,
-    fxCurrent: 10.889,
-    fxBreakevenAvec: 10.52,
-    fxBreakevenSans: 10.57,
-    fxStopLoss: 10.2,
-    maturityDate: "2025-07-10",
-    dateInitiation: "2025-01-10",
-    limitNominal: 50e6,
-  },
-];
 
 /* ─── KPI Card ──────────────────────────────────────────────── */
 const KpiCard = ({ label, value, sub, color = "var(--cyan)", alert }) => (
@@ -317,17 +249,20 @@ const FxBkRow = ({ label, value, current, isStopLoss }) => {
 /* ─── Main Component ────────────────────────────────────────── */
 const TBillsView = () => {
   const { rates, loading: ctxLoading } = useTrading();
+  const { exposureLimits } = useGovernance();
   const [tab, setTab] = useState("position");
   const [selectedId, setSelectedId] = useState(null);
-  const [allTbills, setAllTbills] = useState(FALLBACK_TBILLS);
+  const [allTbills, setAllTbills] = useState([]);
   const [apiLoading, setApiLoading] = useState(false);
   const [fromApi, setFromApi] = useState(false);
+  const [backendError, setBackendError] = useState(false);
 
   const usdMad = parseFloat(rates?.usdMad || 10.035);
   const eurMad = parseFloat(rates?.eurMad || 10.889);
 
   const loadTBills = useCallback(async () => {
     setApiLoading(true);
+    setBackendError(false);
     try {
       const res = await api.tbills.getAll();
       if (res.data && res.data.length > 0) {
@@ -335,7 +270,7 @@ const TBillsView = () => {
         setFromApi(true);
       }
     } catch {
-      // backend absent — on garde les données fallback, pas d'erreur visible
+      setBackendError(true);
     } finally {
       setApiLoading(false);
     }
@@ -346,6 +281,10 @@ const TBillsView = () => {
   }, [loadTBills]);
 
   const loading = ctxLoading || apiLoading;
+
+  // Limites pilotées par l'admin (GovernanceContext) — jamais hardcodées ici.
+  const limitUsd = (exposureLimits.find((l) => l.category === "TBILLS_USD")?.limitMeur ?? 100) * 1e6;
+  const limitEur = (exposureLimits.find((l) => l.category === "TBILLS_EUR")?.limitMeur ?? 50) * 1e6;
 
   const totals = useMemo(() => {
     const r = (v) => parseFloat(v || 0);
@@ -453,33 +392,33 @@ const TBillsView = () => {
         </Button>
       </div>
 
-      {/* ── Mock data warning ── */}
+      {/* ── Statut backend ── */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
           padding: "7px 12px",
-          background: "rgba(251,191,36,0.06)",
-          border: "1px solid rgba(251,191,36,0.18)",
+          background: backendError
+            ? "rgba(239,68,68,0.06)"
+            : "rgba(251,191,36,0.06)",
+          border: `1px solid ${backendError ? "rgba(239,68,68,0.22)" : "rgba(251,191,36,0.18)"}`,
           borderRadius: 5,
           marginBottom: 14,
         }}
       >
         <AlertTriangle
           size={12}
-          style={{ color: "var(--warn)", flexShrink: 0 }}
+          style={{ color: backendError ? "var(--loss)" : "var(--warn)", flexShrink: 0 }}
         />
-        <span
-          style={{
-            fontFamily: "var(--f-body)",
-            fontSize: "0.67rem",
-            color: "var(--tx2)",
-          }}
-        >
-          {fromApi
-            ? "Données chargées depuis le backend — connexion Bloomberg en attente (mock actif)."
-            : "Backend non disponible — données de référence affichées. Positions et P&L seront mis à jour automatiquement."}
+        <span style={{ fontFamily: "var(--f-body)", fontSize: "0.67rem", color: "var(--tx2)" }}>
+          {apiLoading
+            ? "Chargement des positions depuis le backend…"
+            : backendError
+            ? "Backend non disponible — démarrer le serveur Spring Boot pour charger les positions T-Bills."
+            : fromApi
+            ? "Données chargées depuis le backend (mock Bloomberg actif — remplacer par connecteur réel)."
+            : "Connexion backend en attente…"}
         </span>
       </div>
 
@@ -562,7 +501,18 @@ const TBillsView = () => {
       </div>
 
       {/* ══════ TAB: POSITIONS ══════ */}
-      {tab === "position" && (
+      {tab === "position" && allTbills.length === 0 && (
+        <div style={{
+          padding: "40px 0",
+          textAlign: "center",
+          color: "var(--tx3)",
+          fontFamily: "var(--f-body)",
+          fontSize: "0.75rem",
+        }}>
+          {apiLoading ? "Chargement…" : "Aucune position — backend requis pour afficher les données."}
+        </div>
+      )}
+      {tab === "position" && allTbills.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table
             style={{
@@ -904,14 +854,14 @@ const TBillsView = () => {
               <LimitGauge
                 label="US Treasury Bills (USD)"
                 used={totals.totalNomUsd}
-                limit={100e6}
+                limit={limitUsd}
                 currency="USD"
                 color="var(--cyan)"
               />
               <LimitGauge
                 label="BTF / Bons du Trésor (EUR)"
                 used={totals.totalNomEur}
-                limit={50e6}
+                limit={limitEur}
                 currency="EUR"
                 color="#60A5FA"
               />
@@ -951,13 +901,13 @@ const TBillsView = () => {
                     {
                       label: "US Treasury (USD)",
                       bills: allTbills.filter((t) => t.devise === "USD"),
-                      limit: 100e6,
+                      limit: limitUsd,
                       ccy: "USD",
                     },
                     {
                       label: "BTF France (EUR)",
                       bills: allTbills.filter((t) => t.devise === "EUR"),
-                      limit: 50e6,
+                      limit: limitEur,
                       ccy: "EUR",
                     },
                   ].map(({ label, bills, limit, ccy }) => {

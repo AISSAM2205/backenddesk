@@ -317,6 +317,22 @@ const makeComponents = (dark) => {
       headerHeightSM: 32,
     },
 
+    Table: {
+      colorBgContainer: "transparent",
+      headerBg: t.colorBgLayout,
+      headerColor: t.colorTextTertiary,
+      headerSplitColor: "transparent",
+      headerBorderRadius: 0,
+      borderColor: t.colorBorderSecondary,
+      rowHoverBg: dark ? "rgba(12,31,58,0.85)" : "rgba(0,60,140,0.07)",
+      footerBg: "transparent",
+      footerColor: t.colorTextSecondary,
+      cellPaddingBlockSM: 5,
+      cellPaddingInlineSM: 10,
+      cellFontSizeSM: 12,
+      fontSize: 12,
+    },
+
     Tabs: {
       inkBarColor: t.colorPrimary,
       itemActiveColor: t.colorText,

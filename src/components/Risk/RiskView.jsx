@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Button, Card, Tag, Empty, Alert } from "antd";
+import { Button, Card, Tag, Empty, Alert, Statistic } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import {
   AlertTriangle,
@@ -8,6 +8,8 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
@@ -40,7 +42,9 @@ const pnlColor = (v) =>
   parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)";
 
 /* ─── KPI Card (Ant Design Card) ────────────────────────────────── */
-const StatCard = ({ label, value, sub, valColor }) => (
+const StatCard = ({ label, value, sub, valColor, trend }) => {
+  const hasTrend = trend != null && trend !== 0;
+  return (
   <Card
     size="small"
     style={{ flex: "1 1 140px", borderTop: `2px solid ${valColor || "var(--b1)"}` }}
@@ -60,18 +64,29 @@ const StatCard = ({ label, value, sub, valColor }) => (
     >
       {label}
     </span>
-    <div
-      style={{
+    <Statistic
+      value={value}
+      prefix={
+        hasTrend ? (
+          trend > 0 ? (
+            <TrendingUp size={15} style={{ color: valColor }} />
+          ) : (
+            <TrendingDown size={15} style={{ color: valColor }} />
+          )
+        ) : null
+      }
+      valueStyle={{
         fontFamily: "var(--f-mono)",
         fontSize: "1.22rem",
         fontWeight: 600,
         lineHeight: 1,
         color: valColor,
         letterSpacing: "-0.03em",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
       }}
-    >
-      {value}
-    </div>
+    />
     {sub && (
       <p
         style={{
@@ -87,7 +102,8 @@ const StatCard = ({ label, value, sub, valColor }) => (
       </p>
     )}
   </Card>
-);
+  );
+};
 
 /* ─── DV01 Bar ───────────────────────────────────────────────────── */
 const Dv01Bar = ({ value, maxVal }) => {
@@ -221,8 +237,10 @@ const RiskView = () => {
   /* P&L summary */
   const pnlEco = parseFloat(globalDashboard?.totalPlEcoMad || 0);
   const netDaily = parseFloat(globalDashboard?.totalNetDailyMad || 0);
-  const funding = parseFloat(globalDashboard?.totalFundingCostMad || 0);
   const theta = parseFloat(globalDashboard?.totalCpnThetaMad || 0);
+  // Financement JOURNALIER pour l'attribution carry/j = Theta − Net Daily.
+  // (le financement cumulé YTD n'a aucun sens dans une attribution journalière)
+  const funding = theta - netDaily;
 
   const Th = ({ k, label, right }) => (
     <th
@@ -307,6 +325,7 @@ const RiskView = () => {
           <StatCard
             label="Net Daily ★"
             value={fMAD(netDaily, true)}
+            trend={netDaily}
             sub="Carry net Theta − Fin."
             valColor={pnlColor(netDaily)}
           />
@@ -524,7 +543,7 @@ const RiskView = () => {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {[
                 {
-                  label: "Theta Coupon",
+                  label: "Theta Carry",
                   value: theta,
                   col: "var(--cyan)",
                   sign: true,
@@ -660,19 +679,7 @@ const RiskView = () => {
           </Card>
         </div>
 
-        {/* ── Carry Alert Banner ── */}
-        {alerts.length > 0 && (
-          <Alert
-            type="error"
-            showIcon
-            message={`${alerts.length} position${alerts.length > 1 ? "s" : ""} · Carry négatif`}
-            description={alerts
-              .slice(0, 5)
-              .map((a) => a.description || a.isin)
-              .join(" · ")}
-            style={{ fontSize: "0.70rem" }}
-          />
-        )}
+        {/* Bandeau carry retiré — alertes centralisées dans la cloche de notifications (TopBar). */}
 
         {/* ── DV01 / Carry Table ── */}
         <Card size="small" styles={{ body: { padding: 0, overflow: "hidden" } }}>
@@ -928,7 +935,7 @@ const RiskView = () => {
                           color: "var(--warn)",
                         }}
                       >
-                        {fMAD(r.fundingCostMad, true)}
+                        {fMAD(r.dailyFundingMad, true)}
                       </td>
                       <td
                         style={{
@@ -964,8 +971,14 @@ const RiskView = () => {
                               </span>
                             )}
                           </div>
-                        ) : (
+                        ) : r.decision === "HOLD" ? (
                           <span className="badge badge-closed">— HOLD</span>
+                        ) : r.decision === "SELL" ? (
+                          <span className="badge" style={{ background: "rgba(255,43,96,0.15)", color: "var(--loss)" }}>
+                            ▼ SELL
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--tx3)" }}>—</span>
                         )}
                       </td>
                     </tr>

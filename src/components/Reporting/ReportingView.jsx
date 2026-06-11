@@ -3,7 +3,7 @@ import { Button, Card, Tabs, Progress, Tag, Alert, Statistic, Tooltip, Badge, Di
 import * as XLSX from "xlsx";
 import { useTrading } from "../../contexts/TradingContext";
 import { useAuth } from "../../contexts/AuthContext";
-import { useAdmin } from "../../contexts/AdminContext";
+import { useGovernance } from "../../contexts/GovernanceContext";
 
 import {
   FileBarChart,
@@ -713,6 +713,98 @@ const MarketContextPanel = ({ rates }) => {
   );
 };
 
+/* ─── Panneau Risque de Marché — VaR / Expected Shortfall ─────────── */
+const MarketRiskPanel = ({ rk }) => {
+  const header = (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
+      <Shield size={13} style={{ color: "var(--loss)" }} />
+      <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.65rem", letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx1)" }}>
+        Risque de Marché — VaR &amp; Pertes Potentielles
+      </span>
+      <Tooltip
+        placement="topRight"
+        title={
+          <div style={{ fontFamily: "var(--f-body)", fontSize: "0.72rem", lineHeight: 1.6 }}>
+            <div><b>VaR</b> = perte potentielle maximale à l'horizon <b>1 jour</b> pour le niveau de confiance indiqué.</div>
+            <div><b>Paramétrique</b> : z·σ (loi normale, centrée 0). <b>Historique</b> : percentile empirique.</div>
+            <div><b>Expected Shortfall (CVaR)</b> : perte moyenne au-delà du seuil (queue 2,5 %).</div>
+            <div style={{ marginTop: 4, opacity: 0.7 }}>Estimée sur l'historique de P&L journalier du desk.</div>
+          </div>
+        }
+      >
+        <span style={{ marginLeft: 6, color: "var(--tx3)", cursor: "help", fontSize: "0.72rem", fontFamily: "var(--f-body)" }}>ⓘ</span>
+      </Tooltip>
+      {rk && (
+        <span style={{ marginLeft: "auto", fontFamily: "var(--f-mono)", fontSize: "0.58rem", color: "var(--tx3)", padding: "2px 7px", background: "var(--elev)", borderRadius: 4, border: "1px solid var(--b1)" }}>
+          {rk.nObs} jours · horizon 1j
+        </span>
+      )}
+    </div>
+  );
+
+  if (!rk)
+    return (
+      <div className="card" style={{ padding: "16px 18px" }}>
+        {header}
+        <div style={{ fontFamily: "var(--f-body)", fontSize: "0.70rem", color: "var(--tx3)", padding: "8px 0" }}>
+          Historique insuffisant pour estimer la VaR (≥ 5 jours ouvrés requis).
+        </div>
+      </div>
+    );
+
+  const cells = [
+    { label: "VaR 99 % · 1j", sub: "Paramétrique (gaussienne)", val: -rk.varParam99, col: "var(--loss)", strong: true },
+    { label: "VaR 99 % · 1j", sub: "Historique (percentile)",   val: -rk.varHist99,  col: "var(--loss)" },
+    { label: "Expected Shortfall 97,5 %", sub: "CVaR — perte moyenne en queue", val: -rk.es975, col: "var(--loss)", strong: true },
+    { label: "VaR 95 % · 1j", sub: "Paramétrique",              val: -rk.varParam95, col: "var(--warn)" },
+    { label: "Volatilité annualisée", sub: "σ journalier × √252", val: rk.annVol,    col: "var(--warn)" },
+    { label: "Max Drawdown", sub: "Pic-creux P&L éco cumulé",   val: -rk.maxDD,      col: "var(--loss)" },
+  ];
+
+  return (
+    <div className="card" style={{ padding: "16px 18px" }}>
+      {header}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+        {cells.map((c) => (
+          <div
+            key={c.label + c.sub}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 8,
+              background: "var(--surf)",
+              border: "1px solid var(--b1)",
+              borderLeft: `3px solid ${c.col}`,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.55rem", letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--tx2)" }}>
+                {c.label}
+              </span>
+              {c.strong && (
+                <span style={{ fontFamily: "var(--f-disp)", fontWeight: 800, fontSize: "0.44rem", letterSpacing: "0.08em", color: c.col, padding: "1px 5px", borderRadius: 3, background: `${c.col}18`, border: `1px solid ${c.col}30` }}>
+                  CLÉ
+                </span>
+              )}
+            </div>
+            <div style={{ fontFamily: "var(--f-mono)", fontWeight: 700, fontSize: "1.05rem", color: c.col, lineHeight: 1, letterSpacing: "-0.02em" }}>
+              {fMAD(c.val)}
+            </div>
+            <div style={{ fontFamily: "var(--f-body)", fontSize: "0.57rem", color: "var(--tx3)", marginTop: 5, lineHeight: 1.3 }}>
+              {c.sub}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)", lineHeight: 1.5 }}>
+        Lecture : avec 99 % de confiance, la perte du desk sur 1 jour ne devrait pas dépasser{" "}
+        <span style={{ fontFamily: "var(--f-mono)", color: "var(--loss)", fontWeight: 700 }}>{fMAD(-rk.varParam99)}</span>.
+        Au-delà du seuil, la perte moyenne attendue (ES) est de{" "}
+        <span style={{ fontFamily: "var(--f-mono)", color: "var(--loss)", fontWeight: 700 }}>{fMAD(-rk.es975)}</span>.
+      </div>
+    </div>
+  );
+};
+
 const ReportingView = () => {
   const {
     dashboardRows,
@@ -725,31 +817,20 @@ const ReportingView = () => {
     refresh,
   } = useTrading();
   const { user } = useAuth();
-  const { annualTargets, exposureLimits } = useAdmin();
+  const { annualTargets, exposureLimits } = useGovernance();
   const [activeTab, setActiveTab] = useState("morning");
 
-  // Dynamic TARGETS from backend (fallback to hardcoded if not loaded yet)
-  const TARGETS = useMemo(() => {
-    if (annualTargets && annualTargets.length > 0) {
-      return annualTargets.map((t) => ({
+  // Objectifs annuels — source unique : useGovernance (piloté admin, défauts centralisés).
+  const TARGETS = useMemo(
+    () =>
+      annualTargets.map((t) => ({
         key: t.category?.toLowerCase() || t.portfolioName,
         label: t.portfolioName,
         target: parseFloat(t.limitMeur) * 1e6,
         color: t.colorToken || "var(--cyan)",
-      }));
-    }
-    return [
-      {
-        key: "moroc",
-        label: "Eurobond Maroc",
-        target: 35e6,
-        color: "var(--eb)",
-      },
-      { key: "ocp", label: "Eurobond OCP", target: 15e6, color: "#9B3EEF" },
-      { key: "cln", label: "CLN", target: 24e6, color: "var(--cln)" },
-      { key: "egp", label: "EGP Bills", target: 60e6, color: "var(--egp)" },
-    ];
-  }, [annualTargets]);
+      })),
+    [annualTargets],
+  );
 
   const TOTAL_TARGET = useMemo(
     () => TARGETS.reduce((s, t) => s + t.target, 0),
@@ -843,6 +924,62 @@ const ReportingView = () => {
       pos,
       total: vals.length,
       sharpe,
+    };
+  }, [pnlDailyHistory]);
+
+  /* ── Risque de marché : VaR / Expected Shortfall / vol / drawdown ──
+     Construit uniquement à partir de l'historique de P&L journalier (MAD).
+     Méthodo : VaR paramétrique gaussienne (z·σ, centrée 0) + VaR historique
+     (percentile empirique de la distribution) + Expected Shortfall (CVaR,
+     moyenne de la queue de pertes). Aucune dépendance backend. */
+  const riskStats = useMemo(() => {
+    const daily = (pnlDailyHistory || [])
+      .map((d) => parseFloat(d.pnlJourMad || 0))
+      .filter((v) => !isNaN(v));
+    if (daily.length < 5) return null;
+
+    const mean = daily.reduce((s, v) => s + v, 0) / daily.length;
+    const std = Math.sqrt(
+      daily.reduce((s, v) => s + (v - mean) ** 2, 0) / daily.length,
+    );
+    const annVol = std * Math.sqrt(252);
+
+    // VaR paramétrique 1 jour (magnitude de perte, centrée 0 — convention marché)
+    const Z99 = 2.3263, Z95 = 1.6449;
+    const varParam99 = Z99 * std;
+    const varParam95 = Z95 * std;
+
+    // VaR historique : percentile empirique de la distribution des P&L
+    const sorted = [...daily].sort((a, b) => a - b);
+    const percentile = (p) => {
+      const idx = (sorted.length - 1) * p;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    };
+    const varHist99 = Math.max(0, -percentile(0.01));
+    const varHist95 = Math.max(0, -percentile(0.05));
+
+    // Expected Shortfall (CVaR) 97,5 % historique = perte moyenne de la queue 2,5 %
+    const tailN = Math.max(1, Math.round(daily.length * 0.025));
+    const tail = sorted.slice(0, tailN);
+    const es975 = Math.max(0, -(tail.reduce((s, v) => s + v, 0) / tail.length));
+
+    // Max drawdown sur le P&L éco cumulé (ordonné par date)
+    const ordered = [...(pnlDailyHistory || [])]
+      .filter((d) => d.snapshotDate)
+      .sort((a, b) => a.snapshotDate.localeCompare(b.snapshotDate));
+    let peak = -Infinity, maxDD = 0;
+    ordered.forEach((d) => {
+      const v = parseFloat(d.pnlEcoMad || 0);
+      if (v > peak) peak = v;
+      const dd = v - peak;
+      if (dd < maxDD) maxDD = dd;
+    });
+
+    return {
+      mean, std, annVol,
+      varParam99, varParam95, varHist99, varHist95,
+      es975, maxDD: Math.abs(maxDD), nObs: daily.length,
     };
   }, [pnlDailyHistory]);
 
@@ -1382,6 +1519,32 @@ const ReportingView = () => {
     applyNumFmt(wsCont, 1, [5], "0.0");
     XLSX.utils.book_append_sheet(wb, wsCont, "Contribution ISIN");
 
+    /* ── [8/8] RISQUE & VaR ── */
+    const rk = riskStats;
+    const riskVarData = [
+      ["RISQUE DE MARCHÉ — VALUE-AT-RISK & PERTES POTENTIELLES", "", ""],
+      [dateLong, `Trader : ${traderName}`, ""],
+      [],
+      ["Métrique", "Valeur (MAD)", "Méthodologie / Note"],
+      ...(rk
+        ? [
+            ["VaR 99% — horizon 1 jour (paramétrique)", -Math.round(rk.varParam99), "z = 2.3263 × σ journalier (loi normale, centrée 0)"],
+            ["VaR 95% — horizon 1 jour (paramétrique)", -Math.round(rk.varParam95), "z = 1.6449 × σ journalier"],
+            ["VaR 99% — horizon 1 jour (historique)", -Math.round(rk.varHist99), "1er percentile empirique de la distribution P&L"],
+            ["VaR 95% — horizon 1 jour (historique)", -Math.round(rk.varHist95), "5e percentile empirique"],
+            ["Expected Shortfall 97,5% (CVaR)", -Math.round(rk.es975), "Perte moyenne au-delà du seuil (queue 2,5%)"],
+            ["Volatilité journalière (σ)", Math.round(rk.std), "Écart-type du P&L journalier"],
+            ["Volatilité annualisée", Math.round(rk.annVol), "σ × √252"],
+            ["Max Drawdown (P&L éco cumulé)", -Math.round(rk.maxDD), "Repli pic-à-creux maximal"],
+            ["Nombre d'observations", rk.nObs, "Jours ouvrés dans l'historique"],
+          ]
+        : [["Historique insuffisant (≥ 5 jours requis)", "", ""]]),
+    ];
+    const wsRiskVar = XLSX.utils.aoa_to_sheet(riskVarData);
+    applyColWidths(wsRiskVar, [42, 20, 50]);
+    if (rk) applyNumFmt(wsRiskVar, 4, [1], "#,##0");
+    XLSX.utils.book_append_sheet(wb, wsRiskVar, "Risque VaR");
+
     /* ── ÉCRITURE ── */
     XLSX.writeFile(wb, `AWB_MorningReport_${year}_${now.toISOString().slice(0, 10)}.xlsx`);
   }, [
@@ -1400,6 +1563,7 @@ const ReportingView = () => {
     pnl,
     scenarioData,
     TOTAL_TARGET,
+    riskStats,
   ]);
 
   return (
@@ -1603,7 +1767,7 @@ const ReportingView = () => {
                 size="small"
                 onClick={handleExportExcel}
                 icon={<Download size={10} />}
-                title="Morning Report Excel (.xlsx) — 6 onglets : Résumé, Positions, Objectifs, Risques &amp; Scénarios, Historique P&amp;L, Contribution ISIN"
+                title="Morning Report Excel (.xlsx) — 8 onglets : Résumé, Alertes, Positions, Objectifs, Risques &amp; Scénarios, Historique P&amp;L, Contribution ISIN, Risque VaR"
                 style={{
                   background: "rgba(0,202,255,0.06)",
                   borderColor: "rgba(0,202,255,0.18)",
@@ -1869,6 +2033,30 @@ const ReportingView = () => {
                     </Card>
                   ))}
                 </div>
+
+                {/* ── Bande VaR / risque de marché ── */}
+                {riskStats && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", padding: "10px 16px", borderRadius: 8, background: "var(--surf)", border: "1px solid var(--b1)", borderLeft: "3px solid var(--loss)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginRight: 18 }}>
+                      <Shield size={13} style={{ color: "var(--loss)" }} />
+                      <span style={{ fontFamily: "var(--f-disp)", fontWeight: 700, fontSize: "0.58rem", letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--tx2)" }}>
+                        Risque de Marché · 1j
+                      </span>
+                    </div>
+                    {[
+                      { l: "VaR 99%", v: -riskStats.varParam99, c: "var(--loss)" },
+                      { l: "VaR 95%", v: -riskStats.varParam95, c: "var(--warn)" },
+                      { l: "ES 97,5%", v: -riskStats.es975, c: "var(--loss)" },
+                      { l: "Vol. ann.", v: riskStats.annVol, c: "var(--warn)" },
+                      { l: "Max DD", v: -riskStats.maxDD, c: "var(--loss)" },
+                    ].map(({ l, v, c }) => (
+                      <div key={l} style={{ display: "flex", alignItems: "baseline", gap: 6, marginRight: 22 }}>
+                        <span style={{ fontFamily: "var(--f-body)", fontSize: "0.60rem", color: "var(--tx3)" }}>{l}</span>
+                        <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.74rem", fontWeight: 700, color: c }}>{fM(v)} MAD</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* ── Bannière alerte globale ── */}
                 {negCarry.length > 0 && (
@@ -2403,6 +2591,12 @@ const ReportingView = () => {
             <div className="awb-section-label" style={{ display: "none" }}>
               2 / 4 — Attribution P&amp;L · Décomposition &amp; Statistiques
             </div>
+
+            {/* Risque de marché — VaR & pertes potentielles */}
+            <div style={{ marginBottom: 16 }}>
+              <MarketRiskPanel rk={riskStats} />
+            </div>
+
             <div
               style={{
                 display: "grid",
@@ -3698,23 +3892,14 @@ const ReportingView = () => {
                   };
                   const fxByCurrency = { EUR: eurMad, USD: usdMad };
 
-                  // Plafonds pilotés par l'admin (table portfolio_limit).
-                  // Repli sur les valeurs statiques uniquement si le backend n'a rien renvoyé.
-                  const limitsSource =
-                    exposureLimits && exposureLimits.length > 0
-                      ? exposureLimits.map((l) => ({
-                          label: l.portfolioName,
-                          limit: parseFloat(l.limitMeur) * 1e6,
-                          currency: l.currency || "EUR",
-                          color: l.colorToken || "var(--cyan)",
-                          category: l.category,
-                        }))
-                      : [
-                          { label: "Eurobonds (EUR)", limit: 280e6, currency: "EUR", color: "var(--eb)",  category: "EUROBONDS" },
-                          { label: "CLN Maroc (USD)",  limit: 50e6,  currency: "USD", color: "var(--cln)", category: "CLN_MOROC" },
-                          { label: "CLN GCC (USD)",    limit: 30e6,  currency: "USD", color: "#7C3AED",    category: "CLN_GCC" },
-                          { label: "EGP Bills (USD)",  limit: 20e6,  currency: "USD", color: "var(--egp)", category: "EGP_BILLS" },
-                        ];
+                  // Plafonds pilotés par l'admin — source unique : useGovernance.
+                  const limitsSource = exposureLimits.map((l) => ({
+                    label: l.portfolioName,
+                    limit: parseFloat(l.limitMeur) * 1e6,
+                    currency: l.currency || "EUR",
+                    color: l.colorToken || "var(--cyan)",
+                    category: l.category,
+                  }));
 
                   const dynamicLimits = limitsSource.map((l) => {
                     const usedMad = usedMadByCategory[l.category] ?? 0;

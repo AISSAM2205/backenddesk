@@ -114,4 +114,20 @@ public class Trade {
     public String getIsin() {
         return bondInstrument != null ? bondInstrument.getIsin() : assetIdentifier;
     }
+
+    /**
+     * Libellé de l'obligation pour le Blotter (colonne « Obligation »).
+     * bondInstrument est @JsonIgnore + LAZY et open-in-view=false → on protège
+     * l'accès par try/catch : la requête blotter (findWithFilters) le charge en
+     * JOIN FETCH, les autres chemins retombent proprement sur null (→ « Future »
+     * pour un future, « — » sinon). Sans ce getter la colonne restait vide.
+     */
+    @JsonProperty("description")
+    public String getDescription() {
+        try {
+            return bondInstrument != null ? bondInstrument.getDescription() : null;
+        } catch (RuntimeException lazyNotInitialized) {
+            return null;
+        }
+    }
 }

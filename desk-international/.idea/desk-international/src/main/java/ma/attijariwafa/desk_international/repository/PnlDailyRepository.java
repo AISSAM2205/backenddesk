@@ -18,4 +18,8 @@ public interface PnlDailyRepository extends JpaRepository<PnlDaily, Long> {
             LocalDate from, LocalDate to);
 
     Optional<PnlDaily> findTopByOrderBySnapshotDateDesc();
+
+    // Tout l'historique trié — repli résilient quand la fenêtre demandée
+    // (from/to) ne recoupe pas les snapshots seedés (décalage de dates démo).
+    List<PnlDaily> findAllByOrderBySnapshotDateAsc();
 }

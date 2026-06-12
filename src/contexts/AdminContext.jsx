@@ -155,16 +155,23 @@ export const AdminProvider = ({ children }) => {
 
   const updateTraderLimits = async (traderId, limits) => {
     await api.admin.updateLimits(traderId, limits);
+    // Cache localStorage → GovernanceContext trader-side (même navigateur)
     localStorage.setItem(`trader_limits_${traderId}`, JSON.stringify(limits));
     window.dispatchEvent(
       new CustomEvent("traderLimitsUpdated", { detail: { traderId } }),
     );
+    // Mise à jour optimiste immédiate pour l'affichage admin
     dispatch({
       type: "SET_TRADERS",
       payload: state.traders.map((t) =>
         t.id === traderId ? { ...t, limits } : t,
       ),
     });
+    // Resynchronisation depuis le backend pour aligner les valeurs exactes BD
+    try {
+      const res = await api.admin.getTraders();
+      dispatch({ type: "SET_TRADERS", payload: res.data || [] });
+    } catch { /* ignore — l'optimiste suffit */ }
   };
 
   // ── Instrument CRUD ──────────────────────────────────────────────

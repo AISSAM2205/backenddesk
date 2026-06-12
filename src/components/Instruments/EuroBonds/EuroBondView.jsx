@@ -9,6 +9,7 @@ import { Button, Select as AntSelect, Dropdown } from "antd";
 const { Option } = AntSelect;
 import * as XLSX from "xlsx";
 import { useTrading } from "../../../contexts/TradingContext";
+import useLiveDesk from "../../../hooks/useLiveDesk";
 import api from "../../../services/api";
 import {
   AlertTriangle,
@@ -20,6 +21,30 @@ import {
   Download,
   FileSpreadsheet,
 } from "lucide-react";
+
+/* ─── Cellule prix avec flash up/down (flux Bloomberg temps réel) ──
+   Compare la valeur au rendu précédent, flashe vert/rouge 350 ms.
+   Classes .tick-up / .tick-down (index.css). ──────────────────────── */
+const PxFlash = ({ value, children }) => {
+  const prev = useRef(null);
+  const [cls, setCls] = useState("");
+  useEffect(() => {
+    const cur = parseFloat(value);
+    const p = prev.current;
+    if (p != null && !isNaN(cur) && cur !== p) {
+      setCls(cur > p ? "tick-up" : "tick-down");
+      const t = setTimeout(() => setCls(""), 350);
+      prev.current = cur;
+      return () => clearTimeout(t);
+    }
+    if (!isNaN(cur)) prev.current = cur;
+  }, [value]);
+  return (
+    <span className={cls} style={{ transition: "color 0.2s" }}>
+      {children}
+    </span>
+  );
+};
 
 /* ─── Formatters ─────────────────────────────────────────────────── */
 const fMAD = (v) => {
@@ -423,11 +448,15 @@ const Row = ({ r, idx }) => {
           M
         </span>
       </td>
-      <td style={{ ...nb, color: "var(--tx2)" }}>{fPx(r.cleanPrice)}</td>
+      <td style={{ ...nb, color: "var(--tx2)" }}>
+        <PxFlash value={r.cleanPrice}>{fPx(r.cleanPrice)}</PxFlash>
+      </td>
       <td style={{ ...nb, color: "var(--tx2)" }}>{fPx(r.accrued)}</td>
       <td style={{ ...nb, color: "var(--tx3)" }}>{fPx(r.lastWapClean)}</td>
       <td style={{ ...nb, color: "var(--tx2)" }}>{fPx(r.lastWapDirty)}</td>
-      <td style={{ ...nb }}>{fPx(r.dirtyMarket)}</td>
+      <td style={{ ...nb }}>
+        <PxFlash value={r.dirtyMarket}>{fPx(r.dirtyMarket)}</PxFlash>
+      </td>
       <td style={{ ...nb, color: pnlColor(parseFloat(r.perfWap || 0) * 100) }}>
         {r.perfWap != null ? fPct(parseFloat(r.perfWap) * 100, 3) : "—"}
       </td>
@@ -577,8 +606,10 @@ const Row = ({ r, idx }) => {
 
 /* ─── Main Component ─────────────────────────────────────────────── */
 const EuroBondView = () => {
-  const { dashboardRows, loading, refresh, selectedDate, globalDashboard } =
-    useTrading();
+  const { loading, refresh, selectedDate, globalDashboard } = useTrading();
+  // Market Watch branché sur le flux temps réel : Clean/Dirty/Perf WAP, spreads
+  // et P&L latent respirent à chaque tick, par-dessus le baseline REST calibré.
+  const { rows: dashboardRows } = useLiveDesk();
   const [search, setSearch] = useState("");
   const [filterSub, setFilterSub] = useState("ALL");
   const [filterCcy, setFilterCcy] = useState("ALL");

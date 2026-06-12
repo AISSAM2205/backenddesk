@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
+import LivePrice from "../../Dashboard/LivePrice";
 import api from "../../../services/api";
 import {
   TrendingUp,
@@ -162,6 +163,8 @@ const FuturesView = () => {
         pnlEconomicMad: mtmMad,
         pnlAccountingMad: mtmMad,
         netDailyMad: 0,
+        // dernier prix connu (fraction) — repli avant le premier tick live
+        lastPrice: t.lastPrice != null ? parseFloat(t.lastPrice) : null,
         maturityDate: t.valueDate || t.maturityDate,
       };
     });
@@ -464,6 +467,7 @@ const FuturesView = () => {
                     <th style={{ textAlign: "left" }}>Ticker / ISIN</th>
                     <th style={{ textAlign: "left" }}>Type</th>
                     <th style={{ textAlign: "right" }}>Pos. Nette</th>
+                    <th style={{ textAlign: "right" }}>Dernier</th>
                     <th style={{ textAlign: "right" }}>P&L Éco MAD</th>
                     <th style={{ textAlign: "right" }}>P&L Cmptb.</th>
                     <th style={{ textAlign: "right" }}>Net Daily</th>
@@ -511,6 +515,22 @@ const FuturesView = () => {
                           {r.futuresNetPosition != null
                             ? `${r.futuresNetPosition > 0 ? "+" : ""}${r.futuresNetPosition}`
                             : "—"}
+                        </td>
+                        <td
+                          style={{
+                            textAlign: "right",
+                            fontFamily: "var(--f-mono)",
+                            fontSize: "0.68rem",
+                          }}
+                        >
+                          {/* Dernier prix — flux temps réel (flash up/down) */}
+                          <LivePrice
+                            symbol={r.isin}
+                            decimals={4}
+                            fallback={
+                              r.lastPrice != null ? r.lastPrice * 100 : null
+                            }
+                          />
                         </td>
                         <td
                           style={{

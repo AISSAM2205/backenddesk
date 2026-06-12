@@ -1,9 +1,14 @@
 package ma.attijariwafa.desk_international.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import ma.attijariwafa.desk_international.entity.*;
 import ma.attijariwafa.desk_international.repository.*;
+import ma.attijariwafa.desk_international.service.AuditService;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,6 +37,8 @@ public class AdminController {
     private final PortfolioLimitRepository portfolioLimitRepo;
     private final InstrumentRepository     instrumentRepo;
     private final AuditLogRepository       auditRepo;
+    private final SimpMessagingTemplate    messagingTemplate;
+    private final AuditService             auditService;
 
     // ─── Role → default permissions mapping ──────────────────────────
     private static final Map<String, List<String>> ROLE_PERMS = Map.of(
@@ -54,7 +61,9 @@ public class AdminController {
     }
 
     @PostMapping("/traders")
-    public ResponseEntity<Map<String, Object>> createTrader(@RequestBody Map<String, Object> dto) {
+    public ResponseEntity<Map<String, Object>> createTrader(
+            @RequestBody Map<String, Object> dto,
+            HttpServletRequest req) {
         BCryptPasswordEncoder enc = new BCryptPasswordEncoder();
         String firstName = str(dto, "firstName");
         String lastName  = str(dto, "lastName");
@@ -76,14 +85,22 @@ public class AdminController {
             .passwordHash(enc.encode("AWB2025!"))
             .build();
         userRepo.save(user);
+        try {
+            Map<String, Object> d = new LinkedHashMap<>();
+            d.put("username", username);
+            d.put("role",     role);
+            d.put("status",   !"INACTIF".equals(status) && !"BLOQUE".equals(status) ? "ACTIF" : "INACTIF");
+            auditService.log(actorFromReq(req), "app_user", "INSERT", user.getId(), d);
+        } catch (Exception ignored) {}
         return ResponseEntity.ok(buildTraderDto(user, Collections.emptyList()));
     }
 
     @PutMapping("/traders/{id}")
     public ResponseEntity<Map<String, Object>> updateTrader(
             @PathVariable Long id,
-            @RequestBody Map<String, Object> dto) {
-
+            @RequestBody Map<String, Object> dto,
+            HttpServletRequest req) {
+        final String actor = actorFromReq(req);
         return userRepo.findById(id).map(user -> {
             String firstName = str(dto, "firstName");
             String lastName  = str(dto, "lastName");
@@ -99,15 +116,31 @@ public class AdminController {
                 user.setRole(resolveRole(dto));
             }
             userRepo.save(user);
+            try {
+                Map<String, Object> d = new LinkedHashMap<>();
+                d.put("username", user.getUsername());
+                d.put("role",     user.getRole() != null ? user.getRole() : "");
+                d.put("status",   Boolean.TRUE.equals(user.getIsActive()) ? "ACTIF" : "INACTIF");
+                auditService.log(actor, "app_user", "UPDATE", user.getId(), d);
+            } catch (Exception ignored) {}
             return ResponseEntity.ok(buildTraderDto(user, traderLimitRepo.findByUserId(user.getId())));
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/traders/{id}")
-    public ResponseEntity<Void> deleteTrader(@PathVariable Long id) {
+    public ResponseEntity<Void> deleteTrader(
+            @PathVariable Long id,
+            HttpServletRequest req) {
+        final String actor = actorFromReq(req);
         return userRepo.findById(id).map(user -> {
+            String uname = user.getUsername();
             user.setIsActive(false);
             userRepo.save(user);
+            try {
+                Map<String, Object> d = new LinkedHashMap<>();
+                d.put("username", uname);
+                auditService.log(actor, "app_user", "DELETE", user.getId(), d);
+            } catch (Exception ignored) {}
             return ResponseEntity.ok().<Void>build();
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -121,7 +154,8 @@ public class AdminController {
     @PutMapping("/traders/{id}/limits")
     public ResponseEntity<Void> updateTraderLimits(
             @PathVariable Long id,
-            @RequestBody Map<String, Object> dto) {
+            @RequestBody Map<String, Object> dto,
+            HttpServletRequest req) {
 
         userRepo.findById(id).orElse(null);
         traderLimitRepo.deleteByUserId(id);
@@ -148,6 +182,14 @@ public class AdminController {
             }
         }
         traderLimitRepo.saveAll(newLimits);
+        messagingTemplate.convertAndSend("/topic/governance",
+                Map.of("type", "TRADER_LIMITS", "traderId", id));
+        try {
+            Map<String, Object> d = new LinkedHashMap<>();
+            d.put("traderId", String.valueOf(id));
+            d.put("updated",  String.valueOf(newLimits.size()));
+            auditService.log(actorFromReq(req), "trader_limit", "UPDATE", id, d);
+        } catch (Exception ignored) {}
         return ResponseEntity.ok().build();
     }
 
@@ -213,8 +255,11 @@ public class AdminController {
     @PutMapping("/portfolio-limits/{id}")
     public ResponseEntity<PortfolioLimit> updatePortfolioLimit(
             @PathVariable Long id,
-            @RequestBody Map<String, Object> dto) {
+            @RequestBody Map<String, Object> dto,
+            HttpServletRequest req) {
+        final String actor = actorFromReq(req);
         return portfolioLimitRepo.findById(id).map(lim -> {
+            String oldLimit = lim.getLimitMeur() != null ? lim.getLimitMeur().toPlainString() : "?";
             if (dto.containsKey("limitMeur")) {
                 Object v = dto.get("limitMeur");
                 lim.setLimitMeur(v instanceof Number ? BigDecimal.valueOf(((Number)v).doubleValue()) : new BigDecimal(v.toString()));
@@ -223,7 +268,17 @@ public class AdminController {
                 Object v = dto.get("maxDurationYears");
                 lim.setMaxDurationYears(v instanceof Number ? BigDecimal.valueOf(((Number)v).doubleValue()) : new BigDecimal(v.toString()));
             }
-            return ResponseEntity.ok(portfolioLimitRepo.save(lim));
+            PortfolioLimit saved = portfolioLimitRepo.save(lim);
+            messagingTemplate.convertAndSend("/topic/governance",
+                    Map.of("type", "PORTFOLIO_LIMITS"));
+            try {
+                Map<String, Object> d = new LinkedHashMap<>();
+                d.put("portfolio", saved.getPortfolioName() != null ? saved.getPortfolioName() : "");
+                d.put("from",      oldLimit);
+                d.put("to",        saved.getLimitMeur() != null ? saved.getLimitMeur().toPlainString() : "?");
+                auditService.log(actor, "portfolio_limit", "UPDATE", saved.getId(), d);
+            } catch (Exception ignored) {}
+            return ResponseEntity.ok(saved);
         }).orElse(ResponseEntity.notFound().build());
     }
 
@@ -232,13 +287,24 @@ public class AdminController {
     // ─────────────────────────────────────────────────────────────────
 
     @GetMapping("/audit")
-    public ResponseEntity<List<AuditLog>> getAuditLog() {
-        return ResponseEntity.ok(auditRepo.findTop50ByOrderByCreatedAtDesc());
+    public ResponseEntity<List<AuditLog>> getAuditLog(
+            @RequestParam(defaultValue = "200") int limit) {
+        int cap = Math.min(limit, 500);
+        return ResponseEntity.ok(
+            auditRepo.findAll(PageRequest.of(0, cap, Sort.by(Sort.Direction.DESC, "createdAt")))
+                     .getContent()
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────────────────────────
+
+    /** Résout l'acteur depuis le header X-Username (→ Keycloak après intégration). */
+    private static String actorFromReq(HttpServletRequest req) {
+        String h = req.getHeader("X-Username");
+        return (h != null && !h.isBlank()) ? h.trim() : "admin";
+    }
 
     private Map<String, Object> buildTraderDto(AppUser u, List<TraderLimit> limits) {
         String fn = u.getFullName() != null ? u.getFullName() : "";

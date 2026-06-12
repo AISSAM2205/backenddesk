@@ -48,6 +48,18 @@ const today = () => new Date().toISOString().split("T")[0];
 const pnlColor = (v) =>
   parseFloat(v || 0) >= 0 ? "var(--profit)" : "var(--loss)";
 
+/* P&L par ligne de blotter : P&L réalisé si le trade est clôturé (gain/perte
+   cristallisé sur un SELL), sinon P&L latent (MtM) = valorisation marché de la
+   position ouverte. Garantit une colonne toujours renseignée et pertinente,
+   comme sur un vrai blotter de salle. */
+const linePnl = (t) => {
+  const r = t.realizedPnl != null ? parseFloat(t.realizedPnl) : null;
+  const m = t.mtmPnl != null ? parseFloat(t.mtmPnl) : null;
+  if (t.isClosed && r != null && r !== 0) return r;
+  if (m != null && !isNaN(m)) return m;
+  return r != null && !isNaN(r) ? r : null;
+};
+
 /* ─── Badges ─────────────────────────────────────────────────────── */
 const WayBadge = ({ way }) => {
   const w = (way || "").toUpperCase();
@@ -1118,7 +1130,7 @@ const BlotterTable = () => {
       sorted.reduce(
         (a, t) => ({
           nominal: a.nominal + parseFloat(t.nominal || 0),
-          pnl: a.pnl + parseFloat(t.realizedPnl || 0),
+          pnl: a.pnl + (linePnl(t) || 0),
         }),
         { nominal: 0, pnl: 0 },
       ),
@@ -1474,7 +1486,7 @@ const BlotterTable = () => {
               <Th k="wapDirty" label="WAP Dirty" right />
               <Th k="gSpread" label="G-Spread" right />
               <Th k="counterparty" label="Contrepartie" />
-              <Th k="realizedPnl" label="P&L Réalisé" right />
+              <Th k="mtmPnl" label="P&L Latent" right />
               <Th k="isClosed" label="Statut" center />
               <th style={{ textAlign: "center" }}></th>
             </tr>
@@ -1654,10 +1666,10 @@ const BlotterTable = () => {
                       fontFamily: "var(--f-mono)",
                       fontSize: "0.68rem",
                       fontWeight: 600,
-                      color: pnlColor(t.realizedPnl),
+                      color: pnlColor(linePnl(t)),
                     }}
                   >
-                    {t.realizedPnl != null ? fN(t.realizedPnl, 0) : "—"}
+                    {linePnl(t) != null ? fN(linePnl(t), 0) : "—"}
                   </td>
                   <td style={{ textAlign: "center" }}>
                     <StatusBadge isClosed={t.isClosed} />

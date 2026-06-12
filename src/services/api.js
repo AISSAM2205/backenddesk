@@ -13,6 +13,13 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem("authToken");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const raw = localStorage.getItem("userData");
+    if (raw) {
+      const u = JSON.parse(raw);
+      if (u?.username) config.headers["X-Username"] = u.username;
+    }
+  } catch { /* ignore */ }
   return config;
 });
 
@@ -153,13 +160,15 @@ const api = {
     // DELETE /api/admin/instruments/{isin} → soft delete
     deleteInstrument: (isin) =>
       apiClient.delete(`/api/admin/instruments/${isin}`),
+    // GET /api/admin/traders/{id}/limits → { eurobonds:{limit,currency,used}, ... }
+    getTraderLimits: (id) => apiClient.get(`/api/admin/traders/${id}/limits`),
     // GET /api/admin/portfolio-limits → regulatory limits + annual targets
     getPortfolioLimits: () => apiClient.get("/api/admin/portfolio-limits"),
     // PUT /api/admin/portfolio-limits/{id}
     updatePortfolioLimit: (id, dto) =>
       apiClient.put(`/api/admin/portfolio-limits/${id}`, dto),
-    // GET /api/admin/audit → top-50 AuditLog
-    getAuditLog: () => apiClient.get("/api/admin/audit"),
+    // GET /api/admin/audit?limit=200 → derniers N logs (max 500)
+    getAuditLog: (limit = 200) => apiClient.get("/api/admin/audit", { params: { limit } }),
   },
   auth: {
     // POST /api/auth/login → { token, user }

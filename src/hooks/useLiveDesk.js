@@ -65,6 +65,9 @@ export function useLiveDesk() {
         modDur > 0 && refMid > 0
           ? -(dPriceFrac / refMid) / modDur * 10000
           : 0;
+      // Décale un spread du Δyield live SANS fabriquer de valeur quand le
+      // backend n'en fournit pas (null reste null → les « — » restent des « — »).
+      const shiftBp = (v) => (v == null ? null : num(v) + dYieldBp);
 
       const liveLatentMad = baseLatent + dMad;
       const liveEcoMad = baseEco + dMad;
@@ -72,14 +75,22 @@ export function useLiveDesk() {
       totalPlLatentMad += liveLatentMad;
       liveCount += 1;
 
+      // Dirty marché live = clean live + couru du jour (le couru ne tick pas).
+      const liveDirtyFrac = liveMidFrac + num(r.accrued);
+      const wapDirty = num(r.lastWapDirty);
+
       return {
         ...r,
         _live: true,
         _dir: getDirection(r.isin),
         // prix live (fraction) — conserve la convention ×100 des composants
         pxMid: liveMidFrac,
+        cleanPrice: liveMidFrac, // alias backend de pxMid → Market Watch respire
         pxBidAwb: tick.bid / 100,
         pxAskAwb: tick.ask / 100,
+        dirtyMarket: liveDirtyFrac,
+        // Perf vs WAP re-dérivée du dirty live (ratio décimal, comme le backend)
+        perfWap: wapDirty > 0 ? liveDirtyFrac / wapDirty - 1 : r.perfWap,
         // champs live bruts (points) pour la grille blotter
         liveBid: tick.bid,
         liveAsk: tick.ask,
@@ -87,9 +98,15 @@ export function useLiveDesk() {
         liveNetChange: tick.netChange,
         livePctChange: tick.pctChange,
         liveTs: tick.ts,
-        // spreads dérivés du mouvement de prix
-        gSpreadBid: num(r.gSpreadBid) + dYieldBp,
-        iSpreadBid: num(r.iSpreadBid) + dYieldBp,
+        // spreads dérivés du mouvement de prix — niveau qui respire,
+        // structure bid/mid/ask préservée (fourchette stable, réaliste)
+        gSpreadBid: shiftBp(r.gSpreadBid),
+        gSpreadMid: shiftBp(r.gSpreadMid),
+        gSpreadAsk: shiftBp(r.gSpreadAsk),
+        iSpreadBid: shiftBp(r.iSpreadBid),
+        iSpreadMid: shiftBp(r.iSpreadMid),
+        iSpreadAsk: shiftBp(r.iSpreadAsk),
+        assetSwapSpread: shiftBp(r.assetSwapSpread),
         // P&L re-dérivé (MAD + CCY)
         pnlLatentMad: liveLatentMad,
         pnlEconomicMad: liveEcoMad,

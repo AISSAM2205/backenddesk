@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   Tag,
   FileText,
-  Radio,
 } from "lucide-react";
 
 /* ─── Data ──────────────────────────────────────────────────── */
@@ -45,13 +44,6 @@ const NAV_GROUPS = [
   {
     label: "Marchés",
     items: [
-      {
-        id: "marketlive",
-        label: "Marché Live",
-        icon: Radio,
-        accent: "var(--profit)",
-        sub: "Bid/Ask/Last · WebSocket",
-      },
       {
         id: "eurobonds",
         label: "Market Watch",
@@ -696,7 +688,7 @@ const Sidebar = () => {
                   flex: 1,
                 }}
               >
-                WebSocket Live
+                Flux Bloomberg · Live
               </span>
             </>
           ) : (

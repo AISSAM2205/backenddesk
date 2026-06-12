@@ -19,6 +19,7 @@ import React, {
 } from "react";
 import { useAuth } from "./AuthContext";
 import api from "../services/api";
+import wsService from "../services/wsService";
 import {
   PORTFOLIO_LIMITS_DEFAULT,
   DEFAULT_EUROBOND_LIMIT_EUR,
@@ -66,8 +67,8 @@ export const GovernanceProvider = ({ children }) => {
     readTraderEurobondLimit(user?.id),
   );
 
-  /* Chargement best-effort des limites depuis le backend (si disponible),
-     avec repli immédiat sur le snapshot local le plus frais. */
+  /* Chargement best-effort des limites desk depuis le backend.
+     Repli immédiat sur snapshot localStorage → zéro flash vide. */
   const loadPortfolioLimits = useCallback(() => {
     const snap = readLimitsSnapshot();
     if (snap) setRawLimits(snap);
@@ -83,11 +84,34 @@ export const GovernanceProvider = ({ children }) => {
       });
   }, []);
 
+  /* Limite par trader : peinture immédiate depuis localStorage, puis backend
+     (source de vérité cross-poste → GET /api/admin/traders/{id}/limits). */
+  const loadTraderLimit = useCallback((userId) => {
+    if (!userId) return;
+    const cached = readTraderEurobondLimit(userId);
+    if (cached) setTraderLimitEur(cached);
+    api.admin
+      .getTraderLimits(userId)
+      .then((res) => {
+        const val = parseFloat(res.data?.eurobonds?.limit);
+        if (!isNaN(val) && val > 0) {
+          setTraderLimitEur(val);
+          // Met à jour le cache localStorage pour le repli hors-ligne
+          try {
+            const prev = JSON.parse(localStorage.getItem(traderLimitsKey(userId)) || "{}");
+            localStorage.setItem(
+              traderLimitsKey(userId),
+              JSON.stringify({ ...prev, eurobonds: { ...(prev.eurobonds || {}), limit: val } }),
+            );
+          } catch { /* ignore quota / mode privé */ }
+        }
+      })
+      .catch(() => { /* backend absent → garde localStorage/null */ });
+  }, []);
+
   /* Charge à l'authentification + réagit aux éditions admin (limites desk).
-     Deux canaux de propagation :
-     - CustomEvent "portfolioLimitsUpdated" : même onglet (admin → trader même SPA)
-     - StorageEvent "storage"               : onglets séparés (admin dans tab A,
-       trader dans tab B) */
+     Canaux : CustomEvent "portfolioLimitsUpdated" (même onglet) + StorageEvent
+     (onglets séparés, même navigateur) + WebSocket /topic/governance (cross-poste). */
   useEffect(() => {
     if (!isAuthenticated) return;
     loadPortfolioLimits();
@@ -105,15 +129,34 @@ export const GovernanceProvider = ({ children }) => {
 
   /* Limite par trader : (re)charge à la connexion + sur édition admin. */
   useEffect(() => {
-    setTraderLimitEur(readTraderEurobondLimit(user?.id));
+    loadTraderLimit(user?.id);
     const onTrader = (e) => {
-      if (!e.detail || e.detail.traderId === user?.id) {
-        setTraderLimitEur(readTraderEurobondLimit(user?.id));
+      if (!e.detail || String(e.detail.traderId) === String(user?.id)) {
+        loadTraderLimit(user?.id);
       }
     };
     window.addEventListener("traderLimitsUpdated", onTrader);
     return () => window.removeEventListener("traderLimitsUpdated", onTrader);
-  }, [user?.id]);
+  }, [user?.id, loadTraderLimit]);
+
+  /* WebSocket /topic/governance → mise à jour live cross-poste sans refresh.
+     Déclenché par AdminController après chaque PUT limits ou PUT portfolio-limits. */
+  useEffect(() => {
+    const unsub = wsService.subscribe((event) => {
+      if (event.type !== "GOVERNANCE") return;
+      const { type: evType, traderId } = event.payload || {};
+      if (evType === "TRADER_LIMITS") {
+        // Ciblé : ne recharge que si c'est la limite du trader courant
+        if (!traderId || String(traderId) === String(user?.id)) {
+          loadTraderLimit(user?.id);
+        }
+      } else {
+        // PORTFOLIO_LIMITS ou type inconnu → recharge les limites desk
+        loadPortfolioLimits();
+      }
+    });
+    return unsub;
+  }, [user?.id, loadPortfolioLimits, loadTraderLimit]);
 
   const value = useMemo(() => {
     const { exposureLimits, annualTargets } = splitLimits(rawLimits);

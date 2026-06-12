@@ -6,7 +6,6 @@ import CLNView from "../Instruments/CLN/CLNView";
 import EGPView from "../Instruments/EGP/EGPView";
 import PortfolioView from "../Instruments/Portfolio/PortfolioView";
 import BlotterTable from "../Blotter/BlotterTable";
-import LiveBlotter from "../Blotter/LiveBlotter";
 import RiskView from "../Risk/RiskView";
 import FuturesView from "../Instruments/Futures/FuturesView";
 import ReportingView from "../Reporting/ReportingView";
@@ -28,8 +27,6 @@ const MainContent = () => {
         return <FuturesView />;
       case "blotter":
         return <BlotterTable />;
-      case "marketlive":
-        return <LiveBlotter />;
       case "cln":
         return <CLNView />;
       case "egp":

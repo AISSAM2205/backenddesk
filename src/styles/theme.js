@@ -256,23 +256,6 @@ const makeComponents = (dark) => {
       borderRadius: 3,
     },
 
-    Table: {
-      colorBgContainer: "transparent",
-      headerBg: dark ? "#060e1c" : "#f0f4f9",
-      headerColor: t.colorTextTertiary,
-      headerSortActiveBg: dark ? "#060e1c" : "#f0f4f9",
-      headerSortHoverBg: dark ? "#060e1c" : "#f0f4f9",
-      bodySortBg: "transparent",
-      rowHoverBg: dark ? "rgba(12,31,58,0.85)" : "rgba(0,60,140,0.07)",
-      borderColor: dark ? "rgba(15,60,130,0.10)" : "rgba(0,40,90,0.07)",
-      headerBorderRadius: 0,
-      cellFontSize: 11,
-      cellPaddingBlock: 5,
-      cellPaddingInline: 8,
-      footerBg: dark ? "#060e1c" : "#f0f4f9",
-      footerColor: t.colorText,
-    },
-
     Modal: {
       contentBg: t.colorBgElevated,
       headerBg: t.colorBgElevated,
@@ -317,12 +300,18 @@ const makeComponents = (dark) => {
       headerHeightSM: 32,
     },
 
+    // NOTE : clé Table UNIQUE (un doublon écrasait silencieusement la 1re
+    // définition — fusionné). Les fonds de tri sont fixés pour éviter le
+    // surlignage par défaut d'antd sur les colonnes triées.
     Table: {
       colorBgContainer: "transparent",
       headerBg: t.colorBgLayout,
       headerColor: t.colorTextTertiary,
       headerSplitColor: "transparent",
       headerBorderRadius: 0,
+      headerSortActiveBg: t.colorBgLayout,
+      headerSortHoverBg: t.colorBgLayout,
+      bodySortBg: "transparent",
       borderColor: t.colorBorderSecondary,
       rowHoverBg: dark ? "rgba(12,31,58,0.85)" : "rgba(0,60,140,0.07)",
       footerBg: "transparent",

@@ -392,15 +392,18 @@ const MonthlyChart = ({ history }) => {
   const monthly = useMemo(() => {
     const map = {};
     (history || []).forEach((d) => {
+      // Accepte 0 comme valeur valide — seul undefined/null réel est écarté
       if (!d.snapshotDate || d.pnlJourMad == null) return;
-      const m = d.snapshotDate.substring(0, 7);
+      const v = parseFloat(d.pnlJourMad);
+      if (isNaN(v)) return;
+      const m = String(d.snapshotDate).substring(0, 7);
       if (!map[m]) map[m] = 0;
-      map[m] += parseFloat(d.pnlJourMad || 0);
+      map[m] += v;
     });
     return Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => ({
-        label: MONTHS_FR[parseInt(k.split("-")[1]) - 1],
+        label: MONTHS_FR[parseInt(k.split("-")[1]) - 1] ?? k,
         value: v,
       }));
   }, [history]);
@@ -1148,9 +1151,12 @@ const ReportingView = () => {
     const totalDv01 = dashboardRows.reduce((s, r) => s + n(r.dv01Bond), 0);
     const negCarryCount = dashboardRows.filter((r) => r.netDailyAlert).length;
 
-    // P&L de la veille (dernière entrée de l'historique journalier)
-    const lastDaily = pnlDailyHistory && pnlDailyHistory.length > 0
-      ? pnlDailyHistory[pnlDailyHistory.length - 1] : null;
+    // P&L de la veille (J-1) : dernier snapshot AVANT aujourd'hui
+    const todayStrXls = new Date().toISOString().split("T")[0];
+    const hierCandidatesXls = (pnlDailyHistory || []).filter(d => d.snapshotDate && d.snapshotDate < todayStrXls);
+    const lastDaily = hierCandidatesXls.length
+      ? hierCandidatesXls[hierCandidatesXls.length - 1]
+      : (pnlDailyHistory?.length ? pnlDailyHistory[pnlDailyHistory.length - 1] : null);
     const pnlHier = lastDaily ? Math.round(n(lastDaily.pnlJourMad)) : null;
     const dateHier = lastDaily?.snapshotDate ?? null;
 
@@ -1944,8 +1950,12 @@ const ReportingView = () => {
           ════════════════════════════════════════════════════════ */}
           {activeTab === "morning" && (() => {
             const n = v => parseFloat(v ?? 0);
-            const lastDaily = pnlDailyHistory?.length
-              ? pnlDailyHistory[pnlDailyHistory.length - 1] : null;
+            // J-1 = dernier snapshot strictement avant aujourd'hui (repli sur le plus récent si non disponible)
+            const todayStr = new Date().toISOString().split("T")[0];
+            const hierCandidates = (pnlDailyHistory || []).filter(d => d.snapshotDate && d.snapshotDate < todayStr);
+            const lastDaily = hierCandidates.length
+              ? hierCandidates[hierCandidates.length - 1]
+              : (pnlDailyHistory?.length ? pnlDailyHistory[pnlDailyHistory.length - 1] : null);
             const pnlHier = lastDaily ? n(lastDaily.pnlJourMad) : null;
             const dateHier = lastDaily?.snapshotDate;
 
@@ -3741,7 +3751,7 @@ const ReportingView = () => {
                   const map = {};
                   pnlDailyHistory.forEach((d) => {
                     if (!d.snapshotDate) return;
-                    const m = d.snapshotDate.substring(0, 7);
+                    const m = String(d.snapshotDate).substring(0, 7);
                     if (!map[m])
                       map[m] = {
                         pnlJour: 0,
@@ -3750,9 +3760,10 @@ const ReportingView = () => {
                         best: null,
                         worst: null,
                       };
-                    const v = parseFloat(d.pnlJourMad || 0);
+                    const v = parseFloat(d.pnlJourMad ?? 0);
+                    if (isNaN(v)) return;
                     map[m].pnlJour += v;
-                    map[m].finTotal += parseFloat(d.finTotalMad || 0);
+                    map[m].finTotal += parseFloat(d.finTotalMad ?? 0) || 0;
                     map[m].days++;
                     if (map[m].best == null || v > map[m].best) map[m].best = v;
                     if (map[m].worst == null || v < map[m].worst)

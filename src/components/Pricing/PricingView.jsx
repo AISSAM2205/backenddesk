@@ -1,6 +1,8 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { Button, Card, Tabs, Input, Tag, Tooltip, Select, message } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
+import useLiveDesk from "../../hooks/useLiveDesk";
+import LivePrice from "../Dashboard/LivePrice";
 import api from "../../services/api";
 import {
   RefreshCw,
@@ -26,6 +28,67 @@ const fPx = (v) =>
   v == null || isNaN(parseFloat(v)) ? "—" : (parseFloat(v) * 100).toFixed(3);
 const fPct = (v, d = 2) =>
   v == null || isNaN(parseFloat(v)) ? "—" : `${parseFloat(v).toFixed(d)}%`;
+
+/* ─── Cellule numérique avec flash up/down (flux Bloomberg) ──
+   Compare la valeur au rendu précédent et flashe vert/rouge 350 ms.
+   Classes .tick-up / .tick-down définies dans index.css. ─────── */
+const FlashNum = ({ value, style, children }) => {
+  const prev = useRef(null);
+  const [cls, setCls] = useState("");
+  useEffect(() => {
+    const cur = parseFloat(value);
+    const p = prev.current;
+    if (p != null && !isNaN(cur) && cur !== p) {
+      setCls(cur > p ? "tick-up" : "tick-down");
+      const t = setTimeout(() => setCls(""), 350);
+      prev.current = cur;
+      return () => clearTimeout(t);
+    }
+    if (!isNaN(cur)) prev.current = cur;
+  }, [value]);
+  return (
+    <span className={cls} style={{ transition: "color 0.2s", ...style }}>
+      {children}
+    </span>
+  );
+};
+
+/* ─── Badge source de données (façon terminal) ──────────────
+   Vert pulsant quand le flux temps réel publie ; gris « différé »
+   sinon (snapshot REST). Horodatage du dernier tick reçu. ──── */
+const FeedBadge = ({ liveCount, lastTs }) => {
+  const live = liveCount > 0;
+  const time = lastTs
+    ? new Date(lastTs).toLocaleTimeString("fr-FR", { hour12: false })
+    : null;
+  return (
+    <div
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "3px 9px", borderRadius: 4,
+        background: live ? "rgba(0,232,153,0.07)" : "rgba(100,116,139,0.10)",
+        border: `1px solid ${live ? "rgba(0,232,153,0.25)" : "rgba(100,116,139,0.22)"}`,
+      }}
+    >
+      <span
+        style={{
+          width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+          background: live ? "var(--profit)" : "var(--tx3)",
+          boxShadow: live ? "0 0 6px rgba(0,232,153,0.6)" : "none",
+          animation: live ? "pulse-live 2s ease infinite" : "none",
+        }}
+      />
+      <span style={{ fontFamily: "var(--f-disp)", fontSize: "0.55rem", fontWeight: 800, letterSpacing: "0.10em", color: live ? "var(--profit)" : "var(--tx3)" }}>
+        {live ? "BLOOMBERG B-PIPE" : "DIFFÉRÉ · SNAPSHOT"}
+      </span>
+      {live && time && (
+        <span style={{ fontFamily: "var(--f-mono)", fontSize: "0.58rem", color: "var(--tx2)", fontVariantNumeric: "tabular-nums" }}>
+          {time}
+        </span>
+      )}
+    </div>
+  );
+};
 
 /* ─── Signal chip ─────────────────────────────────────────── */
 const SIGNAL_CFG = {
@@ -172,7 +235,10 @@ const STh = ({ label, colKey, tip, tabId, tabSort, onSort, right = true }) => {
 
 /* ─── Main Component ──────────────────────────────────────── */
 const PricingView = () => {
-  const { dashboardRows, rates, loading, refresh, selectedDate } = useTrading();
+  const { rates, loading, refresh, selectedDate } = useTrading();
+  // Lignes fusionnées avec le flux temps réel : prix, spreads et perf WAP
+  // respirent à chaque tick (≈250 ms), comme un écran branché BLPAPI.
+  const { rows: dashboardRows } = useLiveDesk();
   const [tab, setTab]                     = useState("gspread");
   const [filter, setFilter]               = useState("");
   const [editTargets, setEditTargets]     = useState({});
@@ -245,8 +311,11 @@ const PricingView = () => {
     const n = (v) => (v == null || isNaN(parseFloat(v)) ? null : parseFloat(v));
     return (dashboardRows || [])
       .filter(r => {
+        // Écran de pricing spread : eurobonds + CLN uniquement. Les T-bills EGP
+        // sont des instruments d'escompte (pricés en rendement, pas en spread) —
+        // ils ont leur écran dédié ; les inclure afficherait des 0 bp non pro.
         const sub = (r.subAsset || "").toLowerCase();
-        return sub.includes("bond") || sub.includes("cln") || sub.includes("bill");
+        return sub.includes("bond") || sub.includes("cln");
       })
       .filter(r =>
         !filter ||
@@ -294,6 +363,15 @@ const PricingView = () => {
         };
       })
   }, [dashboardRows, filter, editTargets, localDecisions]);
+
+  /* ── État du flux temps réel (badge source + horodatage) ── */
+  const feed = useMemo(() => {
+    let lastTs = 0, n = 0;
+    pricingRows.forEach(r => {
+      if (r._live) { n += 1; if (r.liveTs > lastTs) lastTs = r.liveTs; }
+    });
+    return { liveCount: n, lastTs: lastTs || null };
+  }, [pricingRows]);
 
   /* ── Summary KPIs ── */
   const kpis = useMemo(() => {
@@ -359,7 +437,9 @@ const PricingView = () => {
                         <SpreadBar bid={r.gBid} ask={r.gAsk} mid={r.gMid} target={r.targetSpreadCalc} color="var(--eb)" />
                       </td>
                       <td style={TD(r.gMid != null ? "var(--tx1)" : "var(--tx3)")}>
-                        {r.gMid != null ? `${fBp(r.gMid)} bp` : "—"}
+                        <FlashNum value={r.gMid}>
+                          {r.gMid != null ? `${fBp(r.gMid)} bp` : "—"}
+                        </FlashNum>
                       </td>
                       <td style={TD("var(--tx3)")}>{r.histAvg != null ? `${fBp(r.histAvg)} bp` : "—"}</td>
                       <td style={{ padding:"6px 10px", textAlign:"right" }}>
@@ -475,9 +555,10 @@ const PricingView = () => {
                 <tr>
                   <Th  label="Titre"      right={false} />
                   <Th  label="ISIN"       right={false} />
-                  <STh label="Prix BID"   colKey="priceBid"  tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix bid AWB (×100 = % du pair)" />
-                  <STh label="Prix Mid"   colKey="priceMid"  tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix mid Bloomberg" />
-                  <STh label="Prix ASK"   colKey="priceAsk"  tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix ask AWB" />
+                  <STh label="Prix BID"   colKey="priceBid"  tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix bid AWB (×100 = % du pair) — flux temps réel" />
+                  <STh label="Prix Mid"   colKey="priceMid"  tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix mid Bloomberg — flux temps réel" />
+                  <STh label="Prix ASK"   colKey="priceAsk"  tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix ask AWB — flux temps réel" />
+                  <Th  label="Dernier"    tip="Dernière transaction imprimée (last) — flux Bloomberg temps réel" />
                   <STh label="Accrued"    colKey="accrued"   tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Intérêts courus Bloomberg (% du pair)" />
                   <STh label="WAP Clean"  colKey="lastWapClean" tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Prix moyen pondéré clean des trades BUY ouverts" />
                   <STh label="Perf WAP"   colKey="perfWapBp" tabId="pricing" tabSort={tabSort} onSort={handleSort} tip="Dirty marché − WAP dirty en bp (perfWap × 10 000). Positif = gain latent" />
@@ -497,9 +578,22 @@ const PricingView = () => {
                     >
                       <td style={{ ...TDL("var(--tx1)"), maxWidth:180, overflow:"hidden", textOverflow:"ellipsis" }} title={r.description}>{r.description || "—"}</td>
                       <td style={TDL("var(--cyan)")}>{r.isin}</td>
-                      <td style={TD("var(--loss)")}>{fPx(r.priceBid)}</td>
-                      <td style={{ ...TD("var(--tx1)"), fontWeight:700 }}>{fPx(r.priceMid)}</td>
-                      <td style={TD("var(--profit)")}>{fPx(r.priceAsk)}</td>
+                      <td style={TD("var(--loss)")}>
+                        <FlashNum value={r.priceBid}>{fPx(r.priceBid)}</FlashNum>
+                      </td>
+                      <td style={{ ...TD("var(--tx1)"), fontWeight:700 }}>
+                        <FlashNum value={r.priceMid}>{fPx(r.priceMid)}</FlashNum>
+                      </td>
+                      <td style={TD("var(--profit)")}>
+                        <FlashNum value={r.priceAsk}>{fPx(r.priceAsk)}</FlashNum>
+                      </td>
+                      <td style={{ ...TD(), fontWeight:600 }}>
+                        <LivePrice
+                          symbol={r.isin}
+                          decimals={3}
+                          fallback={r.priceMid != null ? r.priceMid * 100 : null}
+                        />
+                      </td>
                       <td style={TD("var(--tx3)")}>{fPx(r.accrued)}</td>
                       <td style={TD()}>{fPx(r.lastWapClean)}</td>
                       <td style={TD(r.perfWapBp != null && r.perfWapBp >= 0 ? "var(--profit)" : "var(--loss)")}>
@@ -611,6 +705,7 @@ const PricingView = () => {
           </div>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <FeedBadge liveCount={feed.liveCount} lastTs={feed.lastTs} />
           <Input.Search
             value={filter}
             onChange={e => setFilter(e.target.value)}

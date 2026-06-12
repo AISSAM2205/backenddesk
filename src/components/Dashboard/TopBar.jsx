@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTrading } from "../../contexts/TradingContext";
+import useLiveDesk from "../../hooks/useLiveDesk";
 import { useTheme } from "../../contexts/ThemeContext";
 import {
   Bell,
@@ -62,7 +63,12 @@ const TopBar = () => {
   const clock = useClock();
 
   const alerts = (dashboardRows || []).filter((r) => r.netDailyAlert);
-  const pnlEco = parseFloat(globalDashboard?.totalPlEcoMad || 0);
+  // P&L live (respire avec les ticks) ; repli sur l'agrégat REST — même
+  // source que la Sidebar pour que les deux chips affichent le même chiffre.
+  const { totals: liveTotals } = useLiveDesk();
+  const pnlEco = parseFloat(
+    liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
+  );
   const pnlPos = pnlEco >= 0;
   const pnlStr = fMAD(pnlEco);
   const timeStr = clock.toLocaleTimeString("fr-FR", {

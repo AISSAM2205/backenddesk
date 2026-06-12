@@ -1,6 +1,7 @@
 // dto/PricingDto.java
 package ma.attijariwafa.desk_international.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 import java.math.BigDecimal;
@@ -16,14 +17,15 @@ public class PricingDto {
     private LocalDate  snapshotDate;
 
     // G-Spread = différence de rendement vs la courbe gouvernementale (bps)
-    private BigDecimal gSpreadBid;   // ex: 136.65 bps pour MOROC 5.95
-    private BigDecimal gSpreadAsk;   // ex: 115.05 bps
-    private BigDecimal gSpreadMid;   // (BID+ASK)/2 — calculé en Java
+    // @JsonProperty force le nom JSON exact (sinon Jackson sérialise "gspreadBid").
+    @JsonProperty("gSpreadBid") private BigDecimal gSpreadBid;   // ex: 136.65 bps pour MOROC 5.95
+    @JsonProperty("gSpreadAsk") private BigDecimal gSpreadAsk;   // ex: 115.05 bps
+    @JsonProperty("gSpreadMid") private BigDecimal gSpreadMid;   // (BID+ASK)/2 — calculé en Java
 
     // I-Spread = différence vs la courbe swap
-    private BigDecimal iSpreadBid;
-    private BigDecimal iSpreadAsk;
-    private BigDecimal iSpreadMid;
+    @JsonProperty("iSpreadBid") private BigDecimal iSpreadBid;
+    @JsonProperty("iSpreadAsk") private BigDecimal iSpreadAsk;
+    @JsonProperty("iSpreadMid") private BigDecimal iSpreadMid;
 
     // Moyenne historique du G-Spread — contexte pour la décision BUY/HOLD
     private BigDecimal historicalAvgSpread;

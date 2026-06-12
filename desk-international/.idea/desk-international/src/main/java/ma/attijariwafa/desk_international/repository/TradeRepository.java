@@ -49,7 +49,11 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
     List<Trade> findByBondInstrumentIsinAndTradeDateBetween(
             String isin, LocalDate from, LocalDate to);
 
-    @Query("SELECT t FROM Trade t LEFT JOIN t.bondInstrument bi WHERE " +
+    // JOIN FETCH : initialise bondInstrument dans la requête pour que
+    // Trade.getDescription() (colonne « Obligation » du Blotter) fonctionne à la
+    // sérialisation JSON malgré open-in-view=false. LEFT pour garder les futures
+    // (bondInstrument null).
+    @Query("SELECT t FROM Trade t LEFT JOIN FETCH t.bondInstrument bi WHERE " +
             "(:isin IS NULL OR t.assetIdentifier = :isin OR bi.isin = :isin) AND " +
             "(:way IS NULL OR t.way = :way) AND " +
             "(:sub IS NULL OR t.subAsset = :sub) ORDER BY t.tradeDate DESC")

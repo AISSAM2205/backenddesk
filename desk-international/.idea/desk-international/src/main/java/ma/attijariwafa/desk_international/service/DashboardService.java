@@ -112,8 +112,12 @@ public class DashboardService {
              .iSpreadAsk(iAsk)
              .iSpreadMid(iMid)
              .assetSwapSpread(iBid);  // ASW ≈ I-spread bid pour ces bonds
+            // Fallback G-Spread depuis market_data — overridé par PricingConfig ci-dessous
+            if (mkt.getGSpreadBid() != null) b.gSpreadBid(mkt.getGSpreadBid());
+            if (mkt.getGSpreadAsk() != null) b.gSpreadAsk(mkt.getGSpreadAsk());
         }
         if (pricing != null) {
+            // PricingConfig est source autoritaire du G-Spread + décision BUY/HOLD
             b.gSpreadBid(pricing.getGSpreadBid())
              .gSpreadAsk(pricing.getGSpreadAsk())
              .gSpreadMid(pricing.getGSpreadMid())

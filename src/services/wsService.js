@@ -19,7 +19,9 @@ class WsService {
       reconnectDelay: 5000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
-      debug: (str) => console.log("[STOMP]", str),
+      // Console propre en démo : le debug STOMP loggue chaque frame (~800 ms)
+      // et noie la console. Réactiver ponctuellement pour diagnostiquer le WS.
+      debug: () => {},
 
       onConnect: () => {
         this.connected = true;
@@ -44,6 +46,18 @@ class WsService {
             this._emit({ type: "MARKET", payload: ticks });
           } catch {
             /* ignore tick malformé */
+          }
+        });
+
+        // Gouvernance : poussé par AdminController après toute modification
+        // de limite/objectif. GovernanceContext s'y abonne pour mettre à jour
+        // le trader instantanément, sans refresh, quel que soit le poste.
+        this.client.subscribe("/topic/governance", (message) => {
+          try {
+            const payload = JSON.parse(message.body);
+            this._emit({ type: "GOVERNANCE", payload });
+          } catch {
+            this._emit({ type: "GOVERNANCE", payload: {} });
           }
         });
       },

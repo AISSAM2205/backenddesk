@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ma.attijariwafa.desk_international.entity.*;
 import ma.attijariwafa.desk_international.repository.*;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -11,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -46,14 +48,45 @@ public class BloombergMockDataLoader implements ApplicationRunner {
     private final AuditLogRepository                auditLogRepo;
     private final JdbcTemplate                      jdbcTemplate;
 
+    // Démo : forcer une réinitialisation complète (purge + reseed) au démarrage,
+    // quel que soit l'état de la base. Mettre demo.force-reseed=true (application
+    // .properties ou --demo.force-reseed=true) → données de démo 100 % pristines
+    // à chaque lancement, puis remettre false pour conserver les saisies manuelles.
+    @Value("${demo.force-reseed:false}")
+    private boolean forceReseed;
+
     @Override
     public void run(ApplicationArguments args) {
         LocalDate today = LocalDate.now();
         boolean todayDataExists = !marketDataRepo.findByDataDateOrderByInstrumentIsin(today).isEmpty();
-        if (todayDataExists) {
-            log.info("[Bloomberg Mock] Données du jour ({}) déjà présentes — skip.", today);
+        if (todayDataExists && !forceReseed) {
+            log.info("[Bloomberg Mock] Données du jour ({}) déjà présentes — skip seed complet.", today);
+            // ── Auto-réparation ciblée des tables « satellites » ─────────────
+            // Quand le garde saute le seed complet (market_data du jour présent),
+            // certaines tables alimentant des écrans dédiés peuvent être vides
+            // (seed partiel antérieur, jar plus ancien sans ces données, purge
+            // manuelle…). On les re-seede une par une SANS toucher au reste, pour
+            // que CHAQUE écran affiche toujours ses données, sans purge complète
+            // ni DELETE manuel. Chaque bloc est isolé (try/catch) → ne fait
+            // JAMAIS échouer le démarrage (l'app est déjà seedée).
+            healSatellite("pnl_daily (Historique P&L)",
+                    pnlDailyRepo.count(), () -> seedPnlDaily(today));
+            healSatellite("external_pnl_snapshot (EGP Bills + CLN)",
+                    extSnapshotRepo.count(), () -> seedExternalSnapshots(today));
+            healSatellite("tbill (T-Bills / CP)",
+                    tbillRepo.count(), () -> seedTBills(today));
+            // Hedge book futures : NON couvert par le seed satellite historique.
+            // Sans ces 3 contrats, l'écran « Futures & Couverture » affiche 0 partout.
+            healSatellite("futures trades (Hedge Book)",
+                    countFutureTrades(), this::seedFuturesTrades);
+            // Backfill des colonnes Blotter (Catégorie / P&L réalisé / MtM latent)
+            // sur les trades issus d'un seed antérieur → colonnes « Categ. » et
+            // « Obligation/P&L » ne sont plus vides après simple redémarrage.
+            backfillTradeColumns();
             return;
         }
+        if (forceReseed)
+            log.warn("[Bloomberg Mock] demo.force-reseed=true → purge + reseed COMPLET forcé.");
         log.info("[Bloomberg Mock] Chargement données de démonstration pour {}...", today);
         // Purge all existing data to avoid duplicate key errors on re-seed
         auditLogRepo.deleteAll();
@@ -85,6 +118,74 @@ public class BloombergMockDataLoader implements ApplicationRunner {
         seedExternalSnapshots(today);
         seedAuditLog(today);
         log.info("[Bloomberg Mock] ✓ 11 instruments · 13 trades · 15 coupons · 3 T-Bills · 8 limits · 5 traders · external snapshots · 12 audit logs chargés.");
+    }
+
+    /**
+     * Re-seede une table « satellite » SI elle est vide, sans jamais faire
+     * échouer le démarrage. Utilisé par l'auto-réparation quand le garde a sauté
+     * le seed complet mais qu'une table alimentant un écran dédié est vide.
+     */
+    private void healSatellite(String label, long count, Runnable seedAction) {
+        if (count > 0) return; // table déjà peuplée → rien à faire
+        log.warn("[Bloomberg Mock] {} VIDE — re-seed ciblé.", label);
+        try {
+            seedAction.run();
+            log.info("[Bloomberg Mock] ✓ {} re-seedé.", label);
+        } catch (Exception e) {
+            log.error("[Bloomberg Mock] Échec re-seed {} : {}", label, e.getMessage(), e);
+        }
+    }
+
+    /** Nombre de contrats futures actuellement en base (heal du hedge book). */
+    private long countFutureTrades() {
+        Long n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM trade WHERE sub_asset = 'Future'", Long.class);
+        return n != null ? n : 0L;
+    }
+
+    /**
+     * Backfill idempotent des colonnes Blotter sur les trades obligataires issus
+     * d'un seed antérieur (avant l'ajout de trade_category / mtm_pnl). Ne touche
+     * QUE les valeurs manquantes (NULL / 0) → sûr à chaque démarrage, ne réécrit
+     * jamais une donnée saisie. Postgres natif (VALUES + UPDATE…FROM) pour éviter
+     * tout chargement LAZY de l'instrument.
+     */
+    private void backfillTradeColumns() {
+        try {
+            // 1. Catégorie d'opération (déterministe par ISIN) sur les trades sans catégorie
+            jdbcTemplate.update(
+                "UPDATE trade SET trade_category = 'MARKET_MAKING' " +
+                "WHERE trade_category IS NULL AND sub_asset <> 'Future' " +
+                "AND isin IN ('XS2080771806','XS2189848XT7','XS2398769001')");
+            jdbcTemplate.update(
+                "UPDATE trade SET trade_category = 'MONTAGE' " +
+                "WHERE trade_category IS NULL AND sub_asset <> 'Future' " +
+                "AND isin IN ('XS2400000001')");
+            jdbcTemplate.update(
+                "UPDATE trade SET trade_category = 'TRADING' " +
+                "WHERE trade_category IS NULL AND sub_asset <> 'Future'");
+
+            // 2. P&L réalisé = 0 par défaut (positions ouvertes) → colonne jamais vide
+            jdbcTemplate.update(
+                "UPDATE trade SET realized_pnl = 0 " +
+                "WHERE realized_pnl IS NULL AND sub_asset <> 'Future'");
+
+            // 3. P&L latent (MtM) = (prix marché dirty − wap_dirty) × nominal, par ISIN
+            jdbcTemplate.update(
+                "UPDATE trade t SET mtm_pnl = ROUND((m.md - t.wap_dirty) * t.nominal, 2) " +
+                "FROM (VALUES " +
+                "('XS2595028452', 1.048380),('XS2080771806', 0.885750)," +
+                "('XS2368905890', 0.719170),('XS2189848XT7', 0.899360)," +
+                "('XS2337058901', 0.935420),('XS1743523562', 0.970940)," +
+                "('XS2398769001', 0.949770),('XS2400000001', 1.025000)," +
+                "('EG0000123456', 0.985900),('EG0000654321', 0.972000)" +
+                ") AS m(isin, md) " +
+                "WHERE t.isin = m.isin AND t.sub_asset <> 'Future' " +
+                "AND (t.mtm_pnl IS NULL OR t.mtm_pnl = 0) AND t.wap_dirty IS NOT NULL");
+            log.info("[Bloomberg Mock] ✓ Colonnes Blotter (catégorie / P&L / MtM) backfillées.");
+        } catch (Exception e) {
+            log.error("[Bloomberg Mock] Échec backfill colonnes Blotter : {}", e.getMessage(), e);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -364,62 +465,74 @@ public class BloombergMockDataLoader implements ApplicationRunner {
     private void seedBondTrades(Map<String, Instrument> ins, LocalDate today) {
         List<Trade> trades = new ArrayList<>();
 
+        // Chaque trade porte : categorie d'operation (Blotter colonne « Categ. »)
+        // et prix marche dirty (fraction) servant a calculer le P&L latent (MtM)
+        // du Blotter = (marche - wap) x nominal. Realized = 0 (positions ouvertes).
+
         // MOROC 5.95 2031 — two BUY legs → total 73 460 000 USD
         // wapDirty trade 2 = (50M×1.030299 + 23.46M×1.036250) / 73.46M = 1.032185
         trades.add(bond(ins.get("XS2595028452"), LocalDate.of(2024,1,15), LocalDate.of(2024,1,17),
-                "BUY","50000000","1.001361","0.028938","1.030299","1.030299","141.00","Société Générale"));
+                "BUY","50000000","1.001361","0.028938","1.030299","1.030299","141.00","Société Générale","TRADING","1.048380"));
         trades.add(bond(ins.get("XS2595028452"), LocalDate.of(2024,6,5),  LocalDate.of(2024,6,7),
-                "BUY","23460000","1.014750","0.021500","1.036250","1.032185","139.50","Deutsche Bank"));
+                "BUY","23460000","1.014750","0.021500","1.036250","1.032185","139.50","Deutsche Bank","TRADING","1.048380"));
 
         // MOROC 3.00 2032 — 15 000 000 USD
         trades.add(bond(ins.get("XS2080771806"), LocalDate.of(2024,2,20), LocalDate.of(2024,2,22),
-                "BUY","15000000","0.872500","0.007500","0.880000","0.880000","180.00","JPMorgan"));
+                "BUY","15000000","0.872500","0.007500","0.880000","0.880000","180.00","JPMorgan","MARKET_MAKING","0.885750"));
 
         // MOROC 4.00 2050 — 5 000 000 USD
         trades.add(bond(ins.get("XS2368905890"), LocalDate.of(2024,4,10), LocalDate.of(2024,4,12),
-                "BUY","5000000","0.703333","0.006667","0.710000","0.710000","220.00","BNP Paribas"));
+                "BUY","5000000","0.703333","0.006667","0.710000","0.710000","220.00","BNP Paribas","TRADING","0.719170"));
 
         // MOROC 1.375 2030 EUR — 10 000 000 EUR
         trades.add(bond(ins.get("XS2189848XT7"), LocalDate.of(2024,3,12), LocalDate.of(2024,3,14),
-                "BUY","10000000","0.886937","0.003063","0.890000","0.890000","118.00","Citibank"));
+                "BUY","10000000","0.886937","0.003063","0.890000","0.890000","118.00","Citibank","MARKET_MAKING","0.899360"));
 
         // OCP 3.75 2031 — 10 000 000 USD
         trades.add(bond(ins.get("XS2337058901"), LocalDate.of(2024,5,8),  LocalDate.of(2024,5,10),
-                "BUY","10000000","0.919583","0.010417","0.930000","0.930000","192.00","HSBC"));
+                "BUY","10000000","0.919583","0.010417","0.930000","0.930000","192.00","HSBC","TRADING","0.935420"));
 
         // OCP 5.625 2048 — 3 000 000 USD
         trades.add(bond(ins.get("XS1743523562"), LocalDate.of(2024,7,22), LocalDate.of(2024,7,24),
-                "BUY","3000000","0.936562","0.023438","0.960000","0.960000","228.00","Barclays"));
+                "BUY","3000000","0.936562","0.023438","0.960000","0.960000","228.00","Barclays","TRADING","0.970940"));
 
         // MOROC 3.50 2031 EUR — 8 000 000 EUR
         trades.add(bond(ins.get("XS2398769001"), LocalDate.of(2024,9,1),  LocalDate.of(2024,9,3),
-                "BUY","8000000","0.928730","0.011270","0.940000","0.940000","144.00","Natixis"));
+                "BUY","8000000","0.928730","0.011270","0.940000","0.940000","144.00","Natixis","MARKET_MAKING","0.949770"));
 
-        // CLN MOROC 2027 — 3 000 000 USD
+        // CLN MOROC 2027 — 3 000 000 USD (montage structuré → catégorie MONTAGE)
         trades.add(bond(ins.get("XS2400000001"), LocalDate.of(2025,1,10), LocalDate.of(2025,1,14),
-                "BUY","3000000","1.007500","0.012500","1.020000","1.020000","152.00","AWB Internal"));
+                "BUY","3000000","1.007500","0.012500","1.020000","1.020000","152.00","AWB Internal","MONTAGE","1.025000"));
 
         // EGP T-Bill 91J — 50 000 000 EGP
         trades.add(bond(ins.get("EG0000123456"), today.minusDays(30), today.minusDays(28),
-                "BUY","50000000","0.939000","0.000000","0.939000","0.939000","0.00","Banque Misr"));
+                "BUY","50000000","0.939000","0.000000","0.939000","0.939000","0.00","Banque Misr","TRADING","0.985900"));
 
         // EGP T-Bill 182J — 30 000 000 EGP
         trades.add(bond(ins.get("EG0000654321"), today.minusDays(30), today.minusDays(28),
-                "BUY","30000000","0.960000","0.000000","0.960000","0.960000","0.00","CIB Egypt"));
+                "BUY","30000000","0.960000","0.000000","0.960000","0.960000","0.00","CIB Egypt","TRADING","0.972000"));
 
         tradeRepo.saveAll(trades);
     }
 
     private static Trade bond(Instrument inst, LocalDate tradeDate, LocalDate valueDate,
                                String way, String nominal, String cleanPx, String accr,
-                               String dirtyPx, String wapDirty, String gSpread, String cpty) {
+                               String dirtyPx, String wapDirty, String gSpread, String cpty,
+                               String tradeCategory, String marketDirty) {
+        BigDecimal nom    = new BigDecimal(nominal);
+        BigDecimal wapD   = new BigDecimal(wapDirty);
+        // P&L latent (MtM) en devise = (prix marché dirty − WAP dirty) × nominal
+        BigDecimal mtm    = new BigDecimal(marketDirty).subtract(wapD)
+                .multiply(nom).setScale(2, RoundingMode.HALF_UP);
         return Trade.builder()
                 .bondInstrument(inst).subAsset(inst.getSubAsset())
                 .tradeDate(tradeDate).valueDate(valueDate)
-                .way(way).nominal(new BigDecimal(nominal))
+                .way(way).nominal(nom)
                 .cleanPrice(new BigDecimal(cleanPx)).accrued(new BigDecimal(accr))
-                .dirtyPrice(new BigDecimal(dirtyPx)).wapDirty(new BigDecimal(wapDirty))
+                .dirtyPrice(new BigDecimal(dirtyPx)).wapDirty(wapD)
                 .wapClean(new BigDecimal(cleanPx)).gSpread(new BigDecimal(gSpread))
+                .tradeCategory(tradeCategory)
+                .realizedPnl(BigDecimal.ZERO).mtmPnl(mtm)
                 .counterparty(cpty).isClosed(false).build();
     }
 
@@ -514,25 +627,38 @@ public class BloombergMockDataLoader implements ApplicationRunner {
     // 11. PNL DAILY HISTORY (30 business days)
     // ─────────────────────────────────────────────────────────────────────────
     private void seedPnlDaily(LocalDate today) {
-        List<LocalDate> days = businessDays(today.minusDays(1), 30);
+        // 60 jours ouvrés (~3 mois) : courbe assez riche pour un vrai relief de marché.
+        List<LocalDate> days = businessDays(today.minusDays(1), 60);
         List<PnlDaily> records = new ArrayList<>();
 
-        // Random-walk reproductible : dérive haussière + volatilité quotidienne.
-        // Graine fixe → même courbe à chaque seed (démo stable, mais réaliste
-        // avec des replis, contrairement à l'ancienne droite parfaite +600k/j).
+        // ── Courbe d'equity RÉALISTE (modèle AR(1) + chocs fat-tail) ──────────
+        // Une courbe de P&L éco n'est PAS une droite : elle alterne phases de
+        // hausse, plateaux et VRAIS drawdowns, comme un compte de trading réel.
+        //
+        //   dayPnl_t = drift + φ·(dayPnl_{t-1} − drift) + choc_t
+        //
+        // φ (momentum) → les tendances ET les replis PERSISTENT plusieurs jours
+        // (runs réalistes), au lieu d'un bruit blanc autour d'une rampe. ~8 % des
+        // jours portent un choc « gros titre » (×2.4) pour les pics/décrochages.
+        // Graine fixe → courbe identique à chaque seed (démo stable et crédible).
         Random rng = new Random(20260609L);
-        final double base  = 14_000_000d; // P&L éco de départ (MAD)
-        final double trend = 600_000d;    // dérive moyenne par jour ouvré
-        final double vol   = 1_100_000d;  // volatilité quotidienne (écart-type)
-        double cum = base;
+        final double base   = 13_500_000d; // P&L éco de départ (MAD)
+        final double drift  = 230_000d;    // dérive de fond MODÉRÉE (pas une rampe)
+        final double vol    = 1_750_000d;  // volatilité quotidienne (écart-type)
+        final double phi    = 0.55;        // momentum : persistance des mouvements
+        double cum      = base;
+        double prevDay  = 0d;              // P&L de la veille (composante AR1)
 
         for (int i = 0; i < days.size(); i++) {
-            // P&L du jour = tendance + choc gaussien (jour 0 = base, sans choc)
-            double dayPnl = (i == 0) ? 0d : trend + rng.nextGaussian() * vol;
+            double shock = rng.nextGaussian() * vol;
+            if (rng.nextDouble() < 0.08) shock *= 2.4;   // ~8 % : choc fat-tail
+            // Jour 0 = niveau de base, sans à-coup ; ensuite AR(1) autour du drift.
+            double dayPnl = (i == 0) ? 0d : drift + phi * (prevDay - drift) + shock;
+            prevDay = dayPnl;
             cum += dayPnl;
 
             BigDecimal pnlEco  = BigDecimal.valueOf(Math.round(cum));
-            BigDecimal pnlJour = BigDecimal.valueOf(Math.round(i == 0 ? trend : dayPnl));
+            BigDecimal pnlJour = BigDecimal.valueOf(Math.round(i == 0 ? drift : dayPnl));
             int doy = days.get(i).getDayOfYear();
 
             BigDecimal finUsd  = new BigDecimal("109000").multiply(BigDecimal.valueOf(doy));
@@ -571,23 +697,26 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             //          plYield   plFx    plEco    funding
             //          fxMoyen fxCurrent fxBkAvec fxBkSans fxStopLoss
             //          maturity                   dateInit                   limit
+            // Dates relatives à today : duration 0.25 = 3 mois restants (bill 6 mois
+            // à mi-vie), duration 0.50 = 6 mois restants (bill 12 mois à mi-vie).
+            // Jamais de dates absolues ici — sinon les positions apparaissent échues.
             tbill("US912796ZT70", "US Treasury",           "USD", today,
                   "50000000", "5.42", "5.85", "0.25",
                   "680000",   "-45000",  "635000", "-210000",
                   "9.9200",   "10.0350", "9.7850", "9.8300", "9.5000",
-                  LocalDate.of(2025, 6, 17), LocalDate.of(2024, 12, 17), "100000000"),
+                  today.plusMonths(3), today.minusMonths(3), "100000000"),
 
             tbill("US912796YH08", "US Treasury",           "USD", today,
                   "30000000", "5.28", "5.70", "0.50",
                   "396000",   "-28000",  "368000", "-126000",
                   "9.8750",   "10.0350", "9.7350", "9.7900", "9.5000",
-                  LocalDate.of(2025, 9, 15), LocalDate.of(2024, 9, 15),  "100000000"),
+                  today.plusMonths(6), today.minusMonths(6), "100000000"),
 
             tbill("FR0013519668", "Trésor Français (BTF)", "EUR", today,
                   "20000000", "3.15", "3.80", "0.25",
                   "157500",   "12000",   "169500", "-63000",
                   "10.6500",  "10.8890", "10.5200","10.5700","10.2000",
-                  LocalDate.of(2025, 7, 10), LocalDate.of(2025, 1, 10),  "50000000")
+                  today.plusMonths(3), today.minusMonths(3), "50000000")
         ));
     }
 

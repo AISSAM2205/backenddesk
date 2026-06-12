@@ -13,11 +13,14 @@ import ma.attijariwafa.desk_international.repository.PricingConfigRepository;
 import ma.attijariwafa.desk_international.service.DashboardService;
 import ma.attijariwafa.desk_international.service.GlobalDashboardService;
 import ma.attijariwafa.desk_international.service.PnlService;
+import jakarta.servlet.http.HttpServletRequest;
+import ma.attijariwafa.desk_international.service.AuditService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,8 +33,9 @@ public class DashboardController {
     private final PnlService             pnlService;
     private final PnlDailyRepository     pnlDailyRepo;
     private final GlobalDashboardService globalDashService;
-    private final MarketRatesRepository  marketRatesRepo;
+    private final MarketRatesRepository   marketRatesRepo;
     private final PricingConfigRepository pricingConfigRepo;
+    private final AuditService            auditService;
 
     // ─── URL PRINCIPALE ──────────────────────────────────────────
     // GET /api/dashboard/global?date=2025-05-20
@@ -97,15 +101,23 @@ public class DashboardController {
     @PatchMapping("/dashboard/{isin}/decision")
     public ResponseEntity<Void> updateDecision(
             @PathVariable String isin,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, String> body,
+            HttpServletRequest req) {
         String raw = body.get("decision");
-        // null ou chaîne vide = effacer le signal
         String newDecision = (raw == null || raw.isBlank()) ? null : raw.toUpperCase().trim();
         pricingConfigRepo
                 .findTopByInstrumentIsinOrderByConfigDateDesc(isin)
-                .ifPresent(pc -> {
+                .map(pc -> {
                     pc.setDecision(newDecision);
-                    pricingConfigRepo.save(pc);
+                    return pricingConfigRepo.save(pc);
+                })
+                .ifPresent(pc -> {
+                    try {
+                        Map<String, Object> d = new LinkedHashMap<>();
+                        d.put("isin",     isin);
+                        d.put("decision", newDecision != null ? newDecision : "effacé");
+                        auditService.log(username(req), "pricing_config", "UPDATE", pc.getId(), d);
+                    } catch (Exception ignored) {}
                 });
         return ResponseEntity.noContent().build();
     }
@@ -116,7 +128,8 @@ public class DashboardController {
     @PatchMapping("/dashboard/{isin}/target-spread")
     public ResponseEntity<Void> updateTargetSpread(
             @PathVariable String isin,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest req) {
         Object raw = body.get("targetSpread");
         if (raw == null) return ResponseEntity.badRequest().build();
         BigDecimal newTarget;
@@ -127,13 +140,22 @@ public class DashboardController {
         }
         pricingConfigRepo
                 .findTopByInstrumentIsinOrderByConfigDateDesc(isin)
-                .ifPresent(pc -> {
+                .map(pc -> {
                     pc.setTargetSpread(newTarget);
                     // Recalculer la décision : G-Spread BID > nouvelle cible → BUY
                     if (pc.getGSpreadBid() != null) {
                         pc.setDecision(pc.getGSpreadBid().compareTo(newTarget) > 0 ? "BUY" : "HOLD");
                     }
-                    pricingConfigRepo.save(pc);
+                    return pricingConfigRepo.save(pc);
+                })
+                .ifPresent(pc -> {
+                    try {
+                        Map<String, Object> d = new LinkedHashMap<>();
+                        d.put("isin",         isin);
+                        d.put("targetSpread", newTarget.toPlainString());
+                        d.put("decision",     pc.getDecision() != null ? pc.getDecision() : "?");
+                        auditService.log(username(req), "pricing_config", "UPDATE", pc.getId(), d);
+                    } catch (Exception ignored) {}
                 });
         return ResponseEntity.noContent().build();
     }
@@ -148,7 +170,20 @@ public class DashboardController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         LocalDate end   = to   != null ? to   : LocalDate.now();
         LocalDate start = from != null ? from : end.minusDays(90);
-        return ResponseEntity.ok(
-                pnlDailyRepo.findBySnapshotDateBetweenOrderBySnapshotDateAsc(start, end));
+        List<PnlDaily> rows =
+                pnlDailyRepo.findBySnapshotDateBetweenOrderBySnapshotDateAsc(start, end);
+        // Résilience : si la fenêtre [from,to] ne recoupe aucun snapshot (décalage
+        // de dates entre le seed backend et l'horloge front), on renvoie tout
+        // l'historique disponible plutôt qu'une courbe vide ("Chargement…" figé).
+        if (rows.isEmpty()) {
+            rows = pnlDailyRepo.findAllByOrderBySnapshotDateAsc();
+        }
+        return ResponseEntity.ok(rows);
+    }
+
+    // ── username : X-Username header → enrichi par Keycloak après intégration ──
+    private static String username(HttpServletRequest req) {
+        String h = req.getHeader("X-Username");
+        return (h != null && !h.isBlank()) ? h.trim() : "system";
     }
 }

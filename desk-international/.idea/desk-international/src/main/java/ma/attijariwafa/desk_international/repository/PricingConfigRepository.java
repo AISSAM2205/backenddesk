@@ -20,21 +20,25 @@ import java.util.Optional;
 
 public interface PricingConfigRepository extends JpaRepository<PricingConfig, Long> {
 
-    // 1. La méthode qu'il vous manquait pour que le PricingService fonctionne (Renvoie une Liste avec son Vrai Type)
+    // JOIN FETCH p.instrument : charge l'Instrument EAGERLY même avec FetchType.LAZY
+    // Obligatoire avec spring.jpa.open-in-view=false — sinon cfg.getIsin() lève
+    // LazyInitializationException quand le stream est traité hors transaction.
 
-    List<PricingConfig> findByConfigDate(LocalDate configDate);
+    // 1. Tous les configs d'une date — JOIN FETCH évite le N+1 + LazyInit
+    @Query("SELECT p FROM PricingConfig p JOIN FETCH p.instrument WHERE p.configDate = :configDate")
+    List<PricingConfig> findByConfigDate(@Param("configDate") LocalDate configDate);
 
-
-    // 2. La méthode qu'on a corrigée avec HQL pour PostgreSQL
-    @Query("SELECT p FROM PricingConfig p WHERE p.instrument.isin = :isin AND p.configDate = :configDate")
+    // 2. Config par ISIN + date — JOIN FETCH pour accès sûr à instrument
+    @Query("SELECT p FROM PricingConfig p JOIN FETCH p.instrument WHERE p.instrument.isin = :isin AND p.configDate = :configDate")
     Optional<PricingConfig> findByIsinAndConfigDate(@Param("isin") String isin, @Param("configDate") LocalDate configDate);
 
     // 3. Dernier snapshot de pricing pour un ISIN — utilisé par le PATCH /decision
+    //    Pas besoin de JOIN FETCH ici : instrument n'est jamais accédé dans ce path
     Optional<PricingConfig> findTopByInstrumentIsinOrderByConfigDateDesc(String isin);
 
     // 4. Tous les pricings de la date la plus récente — fallback résilient
-    //    (évite SIGNAL/G-Spread vides si l'app tourne un jour postérieur au seed)
-    @Query("SELECT p FROM PricingConfig p WHERE p.configDate = " +
+    //    JOIN FETCH garantit que instrument.isin est accessible hors transaction
+    @Query("SELECT p FROM PricingConfig p JOIN FETCH p.instrument WHERE p.configDate = " +
            "(SELECT MAX(p2.configDate) FROM PricingConfig p2) " +
            "ORDER BY p.instrument.isin")
     List<PricingConfig> findLatest();

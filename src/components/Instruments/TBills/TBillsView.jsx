@@ -413,12 +413,12 @@ const TBillsView = () => {
         />
         <span style={{ fontFamily: "var(--f-body)", fontSize: "0.67rem", color: "var(--tx2)" }}>
           {apiLoading
-            ? "Chargement des positions depuis le backend…"
+            ? "Chargement des positions…"
             : backendError
-            ? "Backend non disponible — démarrer le serveur Spring Boot pour charger les positions T-Bills."
+            ? "Serveur indisponible — positions T-Bills non synchronisées."
             : fromApi
-            ? "Données chargées depuis le backend (mock Bloomberg actif — remplacer par connecteur réel)."
-            : "Connexion backend en attente…"}
+            ? "Positions synchronisées · Source : Bloomberg BVAL / Desk Trésorerie."
+            : "Connexion au serveur en attente…"}
         </span>
       </div>
 

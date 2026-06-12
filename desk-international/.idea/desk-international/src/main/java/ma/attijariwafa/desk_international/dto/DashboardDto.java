@@ -1,6 +1,7 @@
 // dto/DashboardDto.java
 package ma.attijariwafa.desk_international.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 import java.math.BigDecimal;
@@ -46,12 +47,15 @@ public class DashboardDto {
     private BigDecimal accrued;          // couru Bloomberg (MarketData.accruedBloomberg)
     private BigDecimal pxBid;            // prix bid AWB
     private BigDecimal pxAsk;            // prix ask AWB
-    private BigDecimal gSpreadBid;
-    private BigDecimal gSpreadAsk;         // G-Spread côté ask (MarketData)
-    private BigDecimal gSpreadMid;
-    private BigDecimal iSpreadBid;
-    private BigDecimal iSpreadAsk;         // I-Spread côté ask (MarketData)
-    private BigDecimal iSpreadMid;         // I-Spread mid = (bid+ask)/2, calculé dans DashboardService
+    // @JsonProperty force le nom JSON EXACT attendu par le frontend.
+    // Sans cela, le getter Lombok getGSpreadBid() pousse Jackson à sérialiser
+    // "gspreadBid" (g + s minuscules) ≠ "gSpreadBid" lu par le front → colonne vide.
+    @JsonProperty("gSpreadBid") private BigDecimal gSpreadBid;
+    @JsonProperty("gSpreadAsk") private BigDecimal gSpreadAsk;         // G-Spread côté ask (MarketData)
+    @JsonProperty("gSpreadMid") private BigDecimal gSpreadMid;
+    @JsonProperty("iSpreadBid") private BigDecimal iSpreadBid;
+    @JsonProperty("iSpreadAsk") private BigDecimal iSpreadAsk;         // I-Spread côté ask (MarketData)
+    @JsonProperty("iSpreadMid") private BigDecimal iSpreadMid;         // I-Spread mid = (bid+ask)/2, calculé dans DashboardService
     private BigDecimal assetSwapSpread;    // ASW ≈ I-spread pour affichage
     private BigDecimal targetSpread;
     private BigDecimal historicalAvgSpread; // Moyenne historique du G-Spread (référence décision)

@@ -189,7 +189,8 @@ const FuturesView = () => {
           nominal: acc.nominal + parseFloat(r.netNominal || 0),
           dv01: acc.dv01 + parseFloat(r.dv01Bond || 0),
           nbContractsNeeded:
-            acc.nbContractsNeeded + (parseInt(r.nbContractsToHedge, 10) || 0),
+            acc.nbContractsNeeded +
+            Math.abs(parseInt(r.nbContractsToHedge, 10) || 0),
           pnlEco: acc.pnlEco + parseFloat(r.pnlEconomicMad || 0),
         }),
         { nominal: 0, dv01: 0, nbContractsNeeded: 0, pnlEco: 0 },
@@ -209,15 +210,30 @@ const FuturesView = () => {
 
   const totalNetPos = futuresBook.net;
 
-  const hedgeCoverage = useMemo(() => {
-    const totalCurrent = sorted.reduce(
-      (s, r) => s + Math.abs(parseInt(r.currentFuturesPosition, 10) || 0),
-      0,
-    );
-    return totals.nbContractsNeeded > 0
-      ? Math.min((totalCurrent / totals.nbContractsNeeded) * 100, 100)
-      : 0;
-  }, [sorted, totals]);
+  // Couverture DIRECTIONNELLE : un future ne couvre que s'il est dans le bon
+  // sens (signe opposé à l'expo obligataire — bond long ⇒ vendre futures).
+  // Un hedge à l'envers (même signe) double le risque et ne compte PAS comme
+  // couverture ; au-delà de la cible on est en sur-couverture (signalé).
+  const hedge = useMemo(() => {
+    let required = 0; // Σ |contrats cible|
+    let effective = 0; // Σ contrats couvrants effectifs (bon sens, plafond cible)
+    let overHedged = false;
+    sorted.forEach((r) => {
+      const need = parseInt(r.nbContractsToHedge, 10) || 0;
+      const have = parseInt(r.currentFuturesPosition, 10) || 0;
+      if (need === 0) return;
+      required += Math.abs(need);
+      if (need * have < 0) {
+        // signes opposés = hedge dans le bon sens
+        effective += Math.min(Math.abs(have), Math.abs(need));
+        if (Math.abs(have) > Math.abs(need)) overHedged = true;
+      }
+    });
+    const coverage =
+      required > 0 ? Math.min((effective / required) * 100, 100) : 0;
+    return { coverage, effective, required, overHedged };
+  }, [sorted]);
+  const hedgeCoverage = hedge.coverage;
 
   const Th = ({ k, label, right }) => (
     <th
@@ -344,11 +360,8 @@ const FuturesView = () => {
           ))}
 
           {/* Hedge Coverage Arc Gauge */}
-          {totals.nbContractsNeeded > 0 &&
+          {hedge.required > 0 &&
             (() => {
-              const ARC_R = 30,
-                ARC_T = Math.PI * ARC_R;
-              const fill = (hedgeCoverage / 100) * ARC_T;
               const coverColor =
                 hedgeCoverage >= 90
                   ? "var(--profit)"
@@ -374,31 +387,33 @@ const FuturesView = () => {
                     Couverture Hedge
                   </div>
                   <svg
-                    viewBox="0 0 100 56"
-                    style={{ width: 110, maxHeight: 60 }}
+                    viewBox="0 0 100 58"
+                    style={{ width: 110, maxHeight: 62 }}
                   >
                     <path
-                      d="M 14,50 A 30,30 0 0,1 86,50"
+                      d="M 14,50 A 36,36 0 0,1 86,50"
                       fill="none"
-                      stroke="var(--b1)"
-                      strokeWidth="7"
+                      stroke="var(--b2)"
+                      strokeWidth="6"
                       strokeLinecap="round"
                     />
-                    <path
-                      d="M 14,50 A 30,30 0 0,1 86,50"
-                      fill="none"
-                      stroke={coverColor}
-                      strokeWidth="7"
-                      strokeLinecap="round"
-                      strokeDasharray={`${fill.toFixed(2)} ${ARC_T.toFixed(2)}`}
-                      style={{
-                        transition:
-                          "stroke-dasharray 0.9s cubic-bezier(0.34,1.56,0.64,1)",
-                      }}
-                    />
+                    {/* pathLength=100 ⇒ le dash s'exprime en % de l'arc :
+                        robuste à la géométrie, aucun artefact de répétition. */}
+                    {hedgeCoverage > 0 && (
+                      <path
+                        d="M 14,50 A 36,36 0 0,1 86,50"
+                        fill="none"
+                        stroke={coverColor}
+                        strokeWidth="6"
+                        strokeLinecap="round"
+                        pathLength="100"
+                        strokeDasharray={`${hedgeCoverage.toFixed(1)} 100`}
+                        style={{ transition: "stroke-dasharray 0.9s ease" }}
+                      />
+                    )}
                     <text
                       x="50"
-                      y="36"
+                      y="40"
                       textAnchor="middle"
                       fill={coverColor}
                       fontSize="13"
@@ -407,13 +422,15 @@ const FuturesView = () => {
                     >{`${hedgeCoverage.toFixed(0)}%`}</text>
                     <text
                       x="50"
-                      y="48"
+                      y="51"
                       textAnchor="middle"
-                      fill="var(--tx3)"
-                      fontSize="7"
+                      fill={hedge.overHedged ? "var(--warn)" : "var(--tx3)"}
+                      fontSize="6.5"
                       fontFamily="Syne,sans-serif"
                     >
-                      {`${sorted.reduce((s, r) => s + Math.abs(parseInt(r.currentFuturesPosition, 10) || 0), 0)}/${totals.nbContractsNeeded} cts`}
+                      {hedge.overHedged
+                        ? "sur-couverture"
+                        : `${hedge.effective}/${hedge.required} cts`}
                     </text>
                   </svg>
                 </div>
@@ -643,7 +660,14 @@ const FuturesView = () => {
                     idx % 2 === 0 ? "rgba(8,24,41,0.50)" : "transparent";
                   const needed = parseInt(r.nbContractsToHedge, 10) || 0;
                   const current = parseInt(r.currentFuturesPosition, 10) || 0;
-                  const gap = needed - Math.abs(current);
+                  // Hedge correct = signe opposé. Même signe ⇒ couverture nulle
+                  // + alerte de sens (le future aggrave le risque).
+                  const wrongDir =
+                    needed !== 0 && current !== 0 && needed * current > 0;
+                  const effHedged = wrongDir
+                    ? 0
+                    : Math.min(Math.abs(current), Math.abs(needed));
+                  const gap = Math.abs(needed) - effHedged; // à passer (≥0)
                   return (
                     <tr
                       key={r.isin}
@@ -758,6 +782,29 @@ const FuturesView = () => {
                       >
                         {needed === 0 ? (
                           <span style={{ color: "var(--tx3)" }}>—</span>
+                        ) : wrongDir ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-end",
+                              gap: 1,
+                            }}
+                          >
+                            <span
+                              style={{ fontWeight: 700, color: "var(--loss)" }}
+                            >
+                              ⚠ sens
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "0.55rem",
+                                color: "var(--tx3)",
+                              }}
+                            >
+                              cible&nbsp;{Math.abs(needed)}
+                            </span>
+                          </div>
                         ) : gap === 0 ? (
                           <span
                             style={{ color: "var(--profit)", fontWeight: 700 }}
@@ -774,13 +821,9 @@ const FuturesView = () => {
                             }}
                           >
                             <span
-                              style={{
-                                fontWeight: 700,
-                                color:
-                                  gap > 0 ? "#34D399" : "var(--loss)",
-                              }}
+                              style={{ fontWeight: 700, color: "var(--warn)" }}
                             >
-                              {gap > 0 ? `+${gap}` : gap}
+                              {gap}
                             </span>
                             <span
                               style={{
@@ -788,7 +831,7 @@ const FuturesView = () => {
                                 color: "var(--tx3)",
                               }}
                             >
-                              cible&nbsp;{needed}
+                              cible&nbsp;{Math.abs(needed)}
                             </span>
                           </div>
                         )}
@@ -921,12 +964,17 @@ const FuturesView = () => {
         </div>
 
         {/* Alert when hedge gap is significant */}
-        {sorted.some(
-          (r) =>
-            parseInt(r.nbContractsToHedge, 10) > 0 &&
-            Math.abs(parseInt(r.currentFuturesPosition, 10) || 0) <
-              parseInt(r.nbContractsToHedge, 10),
-        ) && (
+        {sorted.some((r) => {
+          const need = parseInt(r.nbContractsToHedge, 10) || 0;
+          const have = parseInt(r.currentFuturesPosition, 10) || 0;
+          if (need === 0) return false;
+          // hedge à l'envers OU sous-couvert (en valeur absolue, bon sens)
+          const wrongDir = have !== 0 && need * have > 0;
+          const effHedged = wrongDir
+            ? 0
+            : Math.min(Math.abs(have), Math.abs(need));
+          return wrongDir || effHedged < Math.abs(need);
+        }) && (
           <div
             style={{
               display: "flex",

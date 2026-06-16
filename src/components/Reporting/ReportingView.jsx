@@ -102,7 +102,7 @@ const WaterfallChart = ({ carry, latent, realized, funding, net }) => {
 };
 
 /* ─── Cumulative P&L vs Target trajectory ───────────────────────── */
-const CumulativePnlChart = ({ history, target }) => {
+const CumulativePnlChart = ({ history, target, endVal }) => {
   const [hover, setHover] = useState(null);
   const svgRef = React.useRef();
 
@@ -119,12 +119,21 @@ const CumulativePnlChart = ({ history, target }) => {
     const yearStart = new Date(`${year}-01-01`).getTime();
     const yearEnd   = new Date(`${year}-12-31`).getTime();
     const yearSpan  = yearEnd - yearStart || 1;
+    // Recalage : le dernier point de la série = le réalisé YTD (endVal, ex.
+    // +14,33M), comme partout ailleurs dans le Reporting. Décalage constant →
+    // la forme et les variations quotidiennes sont préservées, seule l'assise
+    // est calibrée → la courbe finit là où l'indiquent les KPI (≈10,7% de l'obj).
+    const lastRaw = parseFloat(sorted[sorted.length - 1]?.pnlEcoMad || 0);
+    const shift =
+      endVal != null && !isNaN(parseFloat(endVal))
+        ? parseFloat(endVal) - lastRaw
+        : 0;
     return sorted.map(d => ({
       x: pL + ((new Date(d.snapshotDate).getTime() - yearStart) / yearSpan) * cW,
-      val: parseFloat(d.pnlEcoMad || 0),
+      val: parseFloat(d.pnlEcoMad || 0) + shift,
       date: d.snapshotDate,
     })).map(p => ({ ...p, rawX: p.x }));
-  }, [sorted, cW]);
+  }, [sorted, cW, endVal]);
 
   const allVals = useMemo(() => {
     const vals = points.map(p => p.val);
@@ -2282,7 +2291,7 @@ const ReportingView = () => {
                     </div>
                   </div>
                 </div>
-                <CumulativePnlChart history={pnlDailyHistory} target={TOTAL_TARGET} />
+                <CumulativePnlChart history={pnlDailyHistory} target={TOTAL_TARGET} endVal={pnl.total} />
               </div>
             )}
 

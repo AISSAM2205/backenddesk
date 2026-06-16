@@ -17,7 +17,8 @@ public class PnlDailyController {
 
     private final PnlDailyRepository pnlDailyRepo;
 
-    @GetMapping
+    // L'URL finale devient /api/pnl-daily/history pour lever l'ambiguïté
+    @GetMapping("/history")
     public ResponseEntity<List<PnlDaily>> getHistory(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {

@@ -57,6 +57,8 @@ const TopBar = () => {
     lastUpdate,
     selectedDate,
     setDate,
+    selectedPnlEcoMad,
+    isHistoricalDate,
   } = useTrading();
   const { isDark, toggleTheme } = useTheme();
   const [showAlerts, setShowAlerts] = useState(false);
@@ -66,9 +68,13 @@ const TopBar = () => {
   // P&L live (respire avec les ticks) ; repli sur l'agrégat REST — même
   // source que la Sidebar pour que les deux chips affichent le même chiffre.
   const { totals: liveTotals } = useLiveDesk();
-  const pnlEco = parseFloat(
-    liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
-  );
+  // Date passée (J-1/J-5) → P&L éco de clôture (même série que la courbe) ;
+  // aujourd'hui → P&L live qui respire avec les ticks.
+  const pnlEco = isHistoricalDate
+    ? parseFloat(selectedPnlEcoMad || 0)
+    : parseFloat(
+        liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
+      );
   const pnlPos = pnlEco >= 0;
   const pnlStr = fMAD(pnlEco);
   const timeStr = clock.toLocaleTimeString("fr-FR", {

@@ -1420,13 +1420,29 @@ const EuroBondView = () => {
           (m, r) => Math.max(m, Math.abs(r.score)),
           1,
         );
-        const cellBg = (v) => {
-          const t = Math.min(Math.abs(v) / maxAbs, 1);
-          return v > 0
-            ? `rgba(0,232,153,${(0.06 + t * 0.22).toFixed(2)})`
-            : `rgba(255,43,96,${(0.06 + t * 0.22).toFixed(2)})`;
+        // Bande neutre de relative value (convention salle) : au-delà de
+        // ±RV_BAND bp le titre est jugé cheap/riche, sinon il est "fair".
+        const RV_BAND = 5;
+        const rvVerdict = (v) =>
+          v > RV_BAND ? "CHEAP" : v < -RV_BAND ? "RICH" : "FAIR";
+        const RV_STYLE = {
+          CHEAP: {
+            col: "var(--profit)",
+            bg: "rgba(0,232,153,0.12)",
+            bd: "rgba(0,232,153,0.25)",
+          },
+          RICH: {
+            col: "var(--loss)",
+            bg: "rgba(255,43,96,0.12)",
+            bd: "rgba(255,43,96,0.25)",
+          },
+          FAIR: {
+            col: "var(--tx2)",
+            bg: "rgba(148,163,184,0.10)",
+            bd: "rgba(148,163,184,0.22)",
+          },
         };
-        const cellCol = (v) => (v > 0 ? "var(--profit)" : "var(--loss)");
+        const cellCol = (v) => RV_STYLE[rvVerdict(v)].col;
 
         return (
           <div style={{ padding: "0 16px 16px" }}>
@@ -1452,7 +1468,7 @@ const EuroBondView = () => {
                     color: "var(--tx3)",
                   }}
                 >
-                  Score = G-Spread − Target (bp) · vert = cheap · rouge = riche
+                  Score = G-Spread − Target (bp) · &gt;+5 cheap · &lt;−5 riche · ±5 fair
                 </span>
               </div>
 
@@ -1630,40 +1646,28 @@ const EuroBondView = () => {
                               {r.score >= 0 ? "+" : ""}
                               {r.score.toFixed(1)} bp
                             </span>
-                            {r.score > 0 && (
-                              <span
-                                style={{
-                                  fontFamily: "var(--f-disp)",
-                                  fontSize: "0.52rem",
-                                  fontWeight: 700,
-                                  color: "var(--profit)",
-                                  background: "rgba(0,232,153,0.12)",
-                                  border: "1px solid rgba(0,232,153,0.25)",
-                                  borderRadius: 3,
-                                  padding: "1px 5px",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                CHEAP
-                              </span>
-                            )}
-                            {r.score < -5 && (
-                              <span
-                                style={{
-                                  fontFamily: "var(--f-disp)",
-                                  fontSize: "0.52rem",
-                                  fontWeight: 700,
-                                  color: "var(--loss)",
-                                  background: "rgba(255,43,96,0.12)",
-                                  border: "1px solid rgba(255,43,96,0.25)",
-                                  borderRadius: 3,
-                                  padding: "1px 5px",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                RICH
-                              </span>
-                            )}
+                            {(() => {
+                              const v = rvVerdict(r.score);
+                              const s = RV_STYLE[v];
+                              return (
+                                <span
+                                  style={{
+                                    fontFamily: "var(--f-disp)",
+                                    fontSize: "0.52rem",
+                                    fontWeight: 700,
+                                    letterSpacing: "0.06em",
+                                    color: s.col,
+                                    background: s.bg,
+                                    border: `1px solid ${s.bd}`,
+                                    borderRadius: 3,
+                                    padding: "1px 5px",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {v}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </td>
                       </tr>
@@ -2030,7 +2034,24 @@ const EuroBondView = () => {
                                   RICH
                                 </span>
                               )}
-                              {!isCheap && !isRich && (
+                              {cheapScore !== null && !isCheap && !isRich && (
+                                <span
+                                  style={{
+                                    fontFamily: "var(--f-disp)",
+                                    fontSize: "0.55rem",
+                                    fontWeight: 700,
+                                    letterSpacing: "0.06em",
+                                    color: "var(--tx2)",
+                                    background: "rgba(148,163,184,0.10)",
+                                    border: "1px solid rgba(148,163,184,0.22)",
+                                    borderRadius: 3,
+                                    padding: "2px 5px",
+                                  }}
+                                >
+                                  FAIR
+                                </span>
+                              )}
+                              {cheapScore === null && (
                                 <span
                                   style={{
                                     color: "var(--tx3)",

@@ -9,6 +9,7 @@ import { Button, Input, Select as AntSelect } from "antd";
 const { Option } = AntSelect;
 import * as XLSX from "xlsx";
 import api from "../../services/api";
+import { useTrading } from "../../contexts/TradingContext";
 import {
   Search,
   RefreshCw,
@@ -917,6 +918,28 @@ const CancelModal = ({ trade, onClose, onSuccess }) => {
 
 /* ─── Main Component ─────────────────────────────────────────────── */
 const BlotterTable = () => {
+  const { dashboardRows } = useTrading();
+  // G-Spread de référence du bond par ISIN : sert de repli quand le trade
+  // n'a pas de spread d'exécution saisi (cas des trades importés/seedés).
+  const gSpreadByIsin = useMemo(() => {
+    const m = {};
+    (dashboardRows || []).forEach((r) => {
+      const v = parseFloat(r.gSpreadMid ?? r.gSpreadBid);
+      if (r.isin && !isNaN(v)) m[r.isin] = v;
+    });
+    return m;
+  }, [dashboardRows]);
+  const gSpreadOf = useCallback(
+    (t) => {
+      const own = parseFloat(t.gSpread);
+      if (!isNaN(own)) return own;
+      const isin = t.isin || t.assetIdentifier;
+      return isin != null && gSpreadByIsin[isin] != null
+        ? gSpreadByIsin[isin]
+        : null;
+    },
+    [gSpreadByIsin],
+  );
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1052,7 +1075,7 @@ const BlotterTable = () => {
       t.dirtyPrice != null ? parseFloat(t.dirtyPrice) * 100 : "",
       t.accrued != null ? parseFloat(t.accrued) * 100 : "",
       t.wapDirty != null ? parseFloat(t.wapDirty) * 100 : "",
-      parseFloat(t.gSpread) || "",
+      gSpreadOf(t) ?? "",
       t.counterparty || "",
       parseFloat(t.realizedPnl) || "",
       t.isClosed ? "Clôturé" : "Actif",
@@ -1645,7 +1668,10 @@ const BlotterTable = () => {
                       color: "#FCD34D",
                     }}
                   >
-                    {t.gSpread != null ? `${fN(t.gSpread, 1)}bp` : "—"}
+                    {(() => {
+                      const gs = gSpreadOf(t);
+                      return gs != null ? `${fN(gs, 1)}bp` : "—";
+                    })()}
                   </td>
                   <td
                     style={{

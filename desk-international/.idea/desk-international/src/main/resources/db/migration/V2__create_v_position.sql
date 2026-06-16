@@ -1,9 +1,23 @@
--- V1__create_v_position.sql
--- Crée la vue SQL v_position agrégeant les positions nettes depuis la table trade.
--- Hibernate (ddl-auto=update) peut avoir créé une TABLE vide v_position — on la supprime d'abord.
+-- V2__create_v_position.sql
+-- Crée la VUE SQL v_position agrégeant les positions nettes depuis la table trade.
+--
+-- Robuste quel que soit l'état préalable de l'objet « v_position » :
+--   - TABLE vide créée par Hibernate (ddl-auto=update sur l'entité VPosition), ou
+--   - VUE déjà présente.
+-- On supprime selon le TYPE RÉEL avant de recréer : un simple « DROP TABLE IF EXISTS »
+-- échoue sous PostgreSQL si l'objet existe mais n'est pas du type attendu (et IF EXISTS
+-- ne masque pas l'erreur de type).
 
-DROP TABLE IF EXISTS v_position CASCADE;
-DROP VIEW  IF EXISTS v_position;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.views
+               WHERE table_schema = 'public' AND table_name = 'v_position') THEN
+        EXECUTE 'DROP VIEW v_position';
+    ELSIF EXISTS (SELECT 1 FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name = 'v_position') THEN
+        EXECUTE 'DROP TABLE v_position CASCADE';
+    END IF;
+END $$;
 
 CREATE VIEW v_position AS
 SELECT

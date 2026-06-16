@@ -16,9 +16,10 @@ import React, {
   useReducer,
   useEffect,
   useCallback,
+  useMemo,
 } from "react";
 import api, { today } from "../services/api";
-import wsService from "../services/wsService";
+import { wsService } from "../services/wsService";
 
 const TradingContext = createContext();
 
@@ -324,8 +325,10 @@ export const TradingProvider = ({ children }) => {
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "CLEAR_ERROR" });
 
-    // Plage historique : 90 jours glissants jusqu'à la date sélectionnée
-    const endDate = date || today();
+    // Historique P&L : TOUJOURS 90 jours glissants jusqu'à AUJOURD'HUI,
+    // indépendamment de la date sélectionnée. Sinon J-5 tronquerait la série
+    // à J-5 → le KPI « as-of date » et la courbe perdraient leur profondeur.
+    const endDate = today();
     const startDate = (() => {
       const d = new Date(endDate);
       d.setDate(d.getDate() - 90);
@@ -479,10 +482,44 @@ export const TradingProvider = ({ children }) => {
     loadAll(state.selectedDate);
   }, [state.selectedDate, loadAll]);
 
+  // P&L éco « à la date sélectionnée », branché sur EXACTEMENT la même série
+  // que la courbe « P&L Économique — Historique » :
+  //   • Aujourd'hui → agrégat live (totalPlEcoMad).
+  //   • Date passée → clôture pnl_daily de ce jour, recalée par le même
+  //     décalage constant que la courbe (dernier point = P&L live courant).
+  // Garantit KPI ↔ courbe cohérents au bp près, sans toucher au P&L live.
+  const todayStr = today();
+  const isHistoricalDate = !!state.selectedDate && state.selectedDate < todayStr;
+  const selectedPnlEcoMad = useMemo(() => {
+    const live = parseFloat(state.globalDashboard?.totalPlEcoMad || 0);
+    const netDaily = parseFloat(state.globalDashboard?.totalNetDailyMad || 0);
+    const sel = state.selectedDate;
+    const hist = state.pnlDailyHistory || [];
+    if (!sel || sel >= todayStr || hist.length === 0) return live;
+    // Recalage : le dernier point de la série (dernière clôture, ex. J-1) est
+    // placé à `live − netDaily` (= aujourd'hui moins le carry du jour), si bien
+    // que le live d'aujourd'hui = clôture veille + carry. Les points antérieurs
+    // gardent leurs variations réelles. Identique à la courbe → KPI ↔ graphe.
+    const lastRaw = parseFloat(hist[hist.length - 1]?.pnlEcoMad || 0);
+    const shift = live - netDaily - lastRaw;
+    let match = null;
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const ds = hist[i]?.snapshotDate;
+      if (ds && ds <= sel) {
+        match = hist[i];
+        break;
+      }
+    }
+    if (!match) return live;
+    return parseFloat(match.pnlEcoMad || 0) + shift;
+  }, [state.globalDashboard, state.selectedDate, state.pnlDailyHistory, todayStr]);
+
   return (
     <TradingContext.Provider
       value={{
         ...state,
+        selectedPnlEcoMad,
+        isHistoricalDate,
         setActiveInstrument: (id) =>
           dispatch({ type: "SET_ACTIVE_INSTRUMENT", payload: id }),
         setActiveSection: (id) =>

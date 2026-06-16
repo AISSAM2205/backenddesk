@@ -1,4 +1,3 @@
-// controller/DashboardController.java
 package ma.attijariwafa.desk_international.controller;
 
 import lombok.RequiredArgsConstructor;
@@ -37,9 +36,6 @@ public class DashboardController {
     private final PricingConfigRepository pricingConfigRepo;
     private final AuditService            auditService;
 
-    // ─── URL PRINCIPALE ──────────────────────────────────────────
-    // GET /api/dashboard/global?date=2025-05-20
-    // Agrège Desk International + CLN externe + EGP externe en un seul objet
     @GetMapping("/dashboard/global")
     public ResponseEntity<GlobalDashboardDto> getGlobalDashboard(
             @RequestParam(required = false)
@@ -48,9 +44,6 @@ public class DashboardController {
                 globalDashService.buildGlobal(date != null ? date : LocalDate.now()));
     }
 
-    // GET /api/dashboard?date=2025-05-20
-    // → 1 objet JSON par ISIN actif avec TOUT : position + P&L + pricing + risk
-    // → C'est l'équivalent du tableau principal du Dashboard Excel
     @GetMapping("/dashboard")
     public ResponseEntity<List<DashboardDto>> getDashboard(
             @RequestParam(required = false)
@@ -59,7 +52,6 @@ public class DashboardController {
                 dashService.buildDashboard(date != null ? date : LocalDate.now()));
     }
 
-    // GET /api/pnl?date=2025-05-20  → P&L détaillé pour tous les bonds
     @GetMapping("/pnl")
     public ResponseEntity<List<PnLDto>> getAllPnL(
             @RequestParam(required = false)
@@ -68,8 +60,6 @@ public class DashboardController {
                 pnlService.computeAllPnL(date != null ? date : LocalDate.now()));
     }
 
-    // GET /api/pnl/XS2595028452?date=2025-05-20
-    // Attendu : pnlEconomicMad ≈ 12 147 790 MAD
     @GetMapping("/pnl/{isin}")
     public ResponseEntity<PnLDto> getPnLByIsin(
             @PathVariable String isin,
@@ -79,9 +69,6 @@ public class DashboardController {
                 pnlService.computePnLForIsin(isin, date != null ? date : LocalDate.now()));
     }
 
-    // GET /api/dashboard/rates
-    // Retourne les taux de marché du jour (ou le dernier snapshot disponible)
-    // Utilisé par le TickerBar et le TopBar du frontend
     @GetMapping("/dashboard/rates")
     public ResponseEntity<MarketRates> getRates(
             @RequestParam(required = false)
@@ -95,9 +82,6 @@ public class DashboardController {
         return rates != null ? ResponseEntity.ok(rates) : ResponseEntity.notFound().build();
     }
 
-    // PATCH /api/dashboard/{isin}/decision
-    // Body : { "decision": "BUY" | "HOLD" | "SELL" | null }
-    // Met à jour le signal du dernier snapshot PricingConfig pour cet ISIN
     @PatchMapping("/dashboard/{isin}/decision")
     public ResponseEntity<Void> updateDecision(
             @PathVariable String isin,
@@ -122,9 +106,6 @@ public class DashboardController {
         return ResponseEntity.noContent().build();
     }
 
-    // PATCH /api/dashboard/{isin}/target-spread
-    // Body : { "targetSpread": 135.0 }
-    // Met à jour la cible de spread et recalcule la décision BUY/HOLD automatiquement
     @PatchMapping("/dashboard/{isin}/target-spread")
     public ResponseEntity<Void> updateTargetSpread(
             @PathVariable String isin,
@@ -142,7 +123,6 @@ public class DashboardController {
                 .findTopByInstrumentIsinOrderByConfigDateDesc(isin)
                 .map(pc -> {
                     pc.setTargetSpread(newTarget);
-                    // Recalculer la décision : G-Spread BID > nouvelle cible → BUY
                     if (pc.getGSpreadBid() != null) {
                         pc.setDecision(pc.getGSpreadBid().compareTo(newTarget) > 0 ? "BUY" : "HOLD");
                     }
@@ -160,8 +140,6 @@ public class DashboardController {
         return ResponseEntity.noContent().build();
     }
 
-    // GET /api/pnl-daily?from=2025-01-01&to=2025-05-20
-    // Retourne l'historique P&L journalier pour le graphique courbe du dashboard
     @GetMapping("/pnl-daily")
     public ResponseEntity<List<PnlDaily>> getPnlDaily(
             @RequestParam(required = false)
@@ -172,16 +150,12 @@ public class DashboardController {
         LocalDate start = from != null ? from : end.minusDays(90);
         List<PnlDaily> rows =
                 pnlDailyRepo.findBySnapshotDateBetweenOrderBySnapshotDateAsc(start, end);
-        // Résilience : si la fenêtre [from,to] ne recoupe aucun snapshot (décalage
-        // de dates entre le seed backend et l'horloge front), on renvoie tout
-        // l'historique disponible plutôt qu'une courbe vide ("Chargement…" figé).
         if (rows.isEmpty()) {
             rows = pnlDailyRepo.findAllByOrderBySnapshotDateAsc();
         }
         return ResponseEntity.ok(rows);
     }
 
-    // ── username : X-Username header → enrichi par Keycloak après intégration ──
     private static String username(HttpServletRequest req) {
         String h = req.getHeader("X-Username");
         return (h != null && !h.isBlank()) ? h.trim() : "system";

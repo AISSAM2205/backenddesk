@@ -11,6 +11,7 @@ import FuturesView from "../Instruments/Futures/FuturesView";
 import ReportingView from "../Reporting/ReportingView";
 import TBillsView from "../Instruments/TBills/TBillsView";
 import PricingView from "../Pricing/PricingView";
+import ReconciliationView from "../Reconciliation/ReconciliationView";
 
 const MainContent = () => {
   const { activeInstrument } = useTrading();
@@ -37,6 +38,8 @@ const MainContent = () => {
         return <TBillsView />;
       case "pricing":
         return <PricingView />;
+      case "recon":
+        return <ReconciliationView />;
       default:
         return <PortfolioView />;
     }

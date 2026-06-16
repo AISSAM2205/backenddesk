@@ -170,6 +170,31 @@ const api = {
     // GET /api/admin/audit?limit=200 → derniers N logs (max 500)
     getAuditLog: (limit = 200) => apiClient.get("/api/admin/audit", { params: { limit } }),
   },
+  recon: {
+    // POST /api/recon/upload-bo — import du fichier Back Office (CSV)
+    // CSV : ISIN;way;nominal;cleanPrice;tradeDate(dd/MM/yyyy);valueDate;counterparty;boRef
+    uploadBo: (file, user) => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("user", user || "trader");
+      return apiClient.post("/api/recon/upload-bo", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+    },
+    // GET /api/recon/run — lance la réconciliation FO/BO → ReconResultDto
+    // tolNominal / tolPriceBps optionnels (undefined → omis par axios)
+    run: (date = today(), tolNominal, tolPriceBps) =>
+      apiClient.get("/api/recon/run", {
+        params: { date, tolNominal, tolPriceBps },
+      }),
+    // GET /api/recon/bo-trades — enregistrements Back Office courants
+    getBoTrades: () => apiClient.get("/api/recon/bo-trades"),
+    // DELETE /api/recon/bo-trades — purge le jeu BO (avant ré-import)
+    clearBoTrades: () => apiClient.delete("/api/recon/bo-trades"),
+    // PUT /api/recon/breaks/status — met à jour le workflow d'un écart
+    // dto : { breakKey, status, assignee, comment }
+    updateBreakStatus: (dto) => apiClient.put("/api/recon/breaks/status", dto),
+  },
   auth: {
     // POST /api/auth/login → { token, user }
     login: (dto) => apiClient.post("/api/auth/login", dto),

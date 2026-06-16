@@ -19,7 +19,7 @@ import React, {
 } from "react";
 import { useAuth } from "./AuthContext";
 import api from "../services/api";
-import wsService from "../services/wsService";
+import { wsService } from "../services/wsService";
 import {
   PORTFOLIO_LIMITS_DEFAULT,
   DEFAULT_EUROBOND_LIMIT_EUR,

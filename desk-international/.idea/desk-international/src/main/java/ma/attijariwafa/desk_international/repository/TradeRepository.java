@@ -72,4 +72,10 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
            "FROM Trade t WHERE t.hedBondIsin = :isin " +
            "AND t.isClosed = false AND t.nbContracts IS NOT NULL")
     Integer findFuturesNetPositionByHedgeBond(@Param("isin") String isin);
+
+    // Trades ouverts avec leur instrument initialisé (JOIN FETCH) : getIsin() /
+    // getDescription() restent accessibles hors transaction (open-in-view=false).
+    // Utilisé par la réconciliation FO/BO comme jeu Front Office.
+    @Query("SELECT t FROM Trade t LEFT JOIN FETCH t.bondInstrument WHERE t.isClosed = false")
+    List<Trade> findOpenWithInstrument();
 }

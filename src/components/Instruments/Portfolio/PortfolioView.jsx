@@ -647,7 +647,14 @@ const PnlLineChart = ({ data }) => {
 
       {/* X axis labels */}
       {points.map((p, i) => {
-        if (i % step !== 0 && i !== points.length - 1) return null;
+        const isLast = i === points.length - 1;
+        // Le dernier label est toujours affiché. On masque un tick régulier
+        // trop proche du dernier (< un demi-pas) pour éviter le chevauchement
+        // de dates (ex. "12/06" collé à "15/06").
+        if (!isLast) {
+          if (i % step !== 0) return null;
+          if (points.length - 1 - i < step * 0.6) return null;
+        }
         return (
           <text
             key={i}
@@ -1557,17 +1564,19 @@ const MaturityLadder = ({ positions, rates }) => {
       bucket.durW += parseFloat(r.modifiedDuration || 0) * nom; // duration pondérée par nominal
       bucket.count += 1;
     });
-    return acc.filter((b) => b.nomUsd > 0);
+    return acc; // garder TOUTES les tranches → échelle de maturité continue
   }, [positions, rates]);
 
-  if (!buckets.length) return null;
+  // On masque l'écran seulement si AUCUNE exposition (sinon on montre la
+  // ladder complète, tranches vides incluses, comme une vraie échelle).
+  if (!buckets.some((b) => b.nomUsd > 0)) return null;
 
   const maxNom = Math.max(...buckets.map((b) => b.nomUsd), 1);
   const totalNom = buckets.reduce((s, b) => s + b.nomUsd, 0);
   const totalDv01 = buckets.reduce((s, b) => s + b.dv01, 0);
 
   // SVG bar chart dimensions
-  const W = 520, H = 120, padL = 34, padB = 28, padT = 8, barGap = 6;
+  const W = 520, H = 120, padL = 34, padB = 42, padT = 10, barGap = 6;
   const nBuckets = buckets.length;
   const barW = Math.floor((W - padL - (nBuckets - 1) * barGap) / nBuckets);
 
@@ -1657,52 +1666,61 @@ const MaturityLadder = ({ positions, rates }) => {
 
             {/* Bars */}
             {buckets.map((b, i) => {
-              const barH = Math.max(4, ((b.nomUsd / maxNom) * H));
+              const empty = b.nomUsd <= 0;
+              // Hauteur mini visible (6px) pour que les petites tranches restent
+              // lisibles malgré une tranche dominante ; tranche vide = trait fin.
+              const barH = empty ? 3 : Math.max(6, (b.nomUsd / maxNom) * H);
               const x = padL + i * (barW + barGap);
               const y = padT + H - barH;
               const pct = ((b.nomUsd / totalNom) * 100).toFixed(1);
+              const m = b.nomUsd / 1e6;
+              const lblNom = empty
+                ? "—"
+                : `${m >= 100 ? m.toFixed(0) : m.toFixed(1)}M`;
               return (
                 <g key={b.key}>
                   <rect
                     x={x} y={y} width={barW} height={barH}
                     fill={b.color}
-                    opacity={0.75}
+                    opacity={empty ? 0.3 : 0.78}
                     rx={3}
                     style={{ transition: "height 0.6s ease, y 0.6s ease" }}
                   />
-                  {/* Nominal label on top of bar */}
-                  {barH > 16 && (
-                    <text
-                      x={x + barW / 2} y={y + 12}
-                      textAnchor="middle"
-                      fill={b.color}
-                      fontSize={7.5}
-                      fontFamily="JetBrains Mono,monospace"
-                      fontWeight={700}
-                      opacity={0.95}
-                    >
-                      {(b.nomUsd / 1e6).toFixed(0)}M
-                    </text>
-                  )}
+                  {/* Nominal — TOUJOURS affiché, au-dessus de la barre (clampé
+                     pour ne pas sortir du cadre sur la tranche dominante). */}
+                  <text
+                    x={x + barW / 2}
+                    y={Math.max(y - 5, padT + 9)}
+                    textAnchor="middle"
+                    fill={empty ? "var(--tx3)" : b.color}
+                    fontSize={7.5}
+                    fontFamily="JetBrains Mono,monospace"
+                    fontWeight={700}
+                    opacity={0.95}
+                  >
+                    {lblNom}
+                  </text>
                   {/* % label */}
                   <text
-                    x={x + barW / 2} y={padT + H + 14}
+                    x={x + barW / 2} y={padT + H + 15}
                     textAnchor="middle"
-                    fill="var(--tx3)"
-                    fontSize={7}
+                    fill={empty ? "var(--tx3)" : "var(--tx2)"}
+                    fontSize={7.5}
+                    fontWeight={600}
                     fontFamily="JetBrains Mono,monospace"
                   >
                     {pct}%
                   </text>
                   {/* Bucket label */}
                   <text
-                    x={x + barW / 2} y={padT + H + 24}
+                    x={x + barW / 2} y={padT + H + 28}
                     textAnchor="middle"
                     fill={b.color}
                     fontSize={7.5}
                     fontFamily="Syne,sans-serif"
                     fontWeight={700}
                     letterSpacing={0.5}
+                    opacity={empty ? 0.55 : 1}
                   >
                     {b.label}
                   </text>
@@ -2180,6 +2198,8 @@ const PortfolioView = () => {
     lastUpdate,
     clnList,
     egpList,
+    selectedPnlEcoMad,
+    isHistoricalDate,
   } = useTrading();
   const { user } = useAuth();
   // Gouvernance (limites + objectifs) — source de vérité unique, pilotée admin.
@@ -2205,11 +2225,26 @@ const PortfolioView = () => {
   // = source de vérité), sinon repli production reconstruit depuis le P&L éco
   // RÉEL courant + carry quotidien réel. La courbe n'est ainsi JAMAIS vide.
   const { chartData, chartDerived } = useMemo(() => {
-    if (pnlDailyHistory && pnlDailyHistory.length >= 2) {
-      return { chartData: pnlDailyHistory, chartDerived: false };
-    }
     const endVal = parseFloat(globalDashboard?.totalPlEcoMad || 0);
     const carry = parseFloat(globalDashboard?.totalNetDailyMad || 0);
+    if (pnlDailyHistory && pnlDailyHistory.length >= 2) {
+      // Recale l'historique persisté : son DERNIER point (dernière clôture,
+      // ex. J-1) est placé à `live − carry du jour`, si bien que le P&L live
+      // d'aujourd'hui = clôture veille + carry. Décalage constant → toutes les
+      // variations quotidiennes sont préservées. EXACTEMENT le même recalage
+      // que le KPI « as-of date » (selectedPnlEcoMad) → KPI ↔ courbe alignés.
+      const last = parseFloat(
+        pnlDailyHistory[pnlDailyHistory.length - 1]?.pnlEcoMad || 0,
+      );
+      const shift = endVal ? endVal - carry - last : 0;
+      const data = shift
+        ? pnlDailyHistory.map((d) => ({
+            ...d,
+            pnlEcoMad: parseFloat(d.pnlEcoMad || 0) + shift,
+          }))
+        : pnlDailyHistory;
+      return { chartData: data, chartDerived: false };
+    }
     if (!endVal) return { chartData: pnlDailyHistory || [], chartDerived: false };
     return { chartData: buildPnlHistoryFallback(endVal, carry), chartDerived: true };
   }, [pnlDailyHistory, globalDashboard]);
@@ -2255,9 +2290,13 @@ const PortfolioView = () => {
   // P&L live (respire avec les prix) ; repli sur l'agrégat REST. Le delta
   // latent intraday s'applique aussi au comptable (la MtM y entre aussi).
   const liveDelta = parseFloat(liveTotals?._liveDeltaMad || 0);
-  const pnlEco = parseFloat(
-    liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
-  );
+  // Date passée (J-1/J-5) → P&L éco de clôture, aligné sur la courbe Historique ;
+  // aujourd'hui → P&L live (respire avec les ticks).
+  const pnlEco = isHistoricalDate
+    ? parseFloat(selectedPnlEcoMad || 0)
+    : parseFloat(
+        liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
+      );
   const pnlAcct =
     parseFloat(globalDashboard?.totalPnlAccountingMad || 0) + liveDelta;
   const pnlPos = pnlEco >= 0;
@@ -2976,7 +3015,7 @@ const PortfolioView = () => {
             </div>
           </div>
 
-          {/* ── P&L Bridge — Réconciliation composants ── */}
+          {/* ── P&L Bridge — Décomposition composants ── */}
           {pnlEco !== 0 && globalDashboard && (() => {
             const latent   = parseFloat(globalDashboard.totalPlLatentMad   || 0);
             const realized = parseFloat(globalDashboard.totalPlRealizedMad || 0);
@@ -2984,8 +3023,14 @@ const PortfolioView = () => {
             const funding  = parseFloat(globalDashboard.totalFundingCostMad || 0);
             const accounting = latent + realized + coupons; // = P&L Comptable (Excel col. X)
             const computed = accounting - funding;
-            const residual = pnlEco - computed;
-            const isBalanced = Math.abs(residual) < Math.max(Math.abs(pnlEco) * 0.005, 10000);
+            // Le bridge décompose TOUJOURS le P&L éco COURANT du book : ses
+            // composantes (latent/réalisé/coupons/funding) sont celles
+            // d'aujourd'hui, donc on réconcilie l'agrégat REST courant — JAMAIS
+            // le P&L « as-of date » (J-1/J-5), sinon faux écart de réconciliation.
+            const pnlEcoBridge = parseFloat(globalDashboard.totalPlEcoMad || 0);
+            const residual = pnlEcoBridge - computed;
+            const isBalanced =
+              Math.abs(residual) < Math.max(Math.abs(pnlEcoBridge) * 0.005, 10000);
             const items = [
               { label: "MtM Latent", val: latent,   color: latent   >= 0 ? "var(--profit)" : "var(--loss)" },
               { label: "Réalisé",    val: realized,  color: realized >= 0 ? "var(--profit)" : "var(--loss)" },
@@ -3019,7 +3064,7 @@ const PortfolioView = () => {
                       color: "var(--tx3)",
                     }}
                   >
-                    P&amp;L Bridge — Réconciliation
+                    P&amp;L Bridge — Décomposition
                   </span>
                   <span
                     style={{
@@ -3186,14 +3231,14 @@ const PortfolioView = () => {
                         fontFamily: "var(--f-mono)",
                         fontSize: "0.90rem",
                         fontWeight: 700,
-                        color: pnlEco >= 0 ? "var(--profit)" : "var(--loss)",
+                        color: pnlEcoBridge >= 0 ? "var(--profit)" : "var(--loss)",
                         minWidth: 84,
                         textAlign: "right",
                         flexShrink: 0,
                         letterSpacing: "-0.02em",
                       }}
                     >
-                      {fMAD(pnlEco, true)}
+                      {fMAD(pnlEcoBridge, true)}
                     </span>
                   </div>
                 </div>

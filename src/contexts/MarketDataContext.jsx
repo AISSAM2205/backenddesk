@@ -17,7 +17,7 @@ import React, {
   useRef,
   useReducer,
 } from "react";
-import wsService from "../services/wsService";
+import { wsService } from "../services/wsService";
 
 const MarketDataContext = createContext(null);
 

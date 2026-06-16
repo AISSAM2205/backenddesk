@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Tag,
   FileText,
+  GitCompareArrows,
 } from "lucide-react";
 
 /* ─── Data ──────────────────────────────────────────────────── */
@@ -102,6 +103,13 @@ const NAV_GROUPS = [
         icon: BookOpen,
         accent: "var(--profit)",
         sub: "Saisie · Historique",
+      },
+      {
+        id: "recon",
+        label: "Réconciliation FO/BO",
+        icon: GitCompareArrows,
+        accent: "var(--cyan)",
+        sub: "Trades · Positions · Écarts",
       },
       {
         id: "reporting",
@@ -410,6 +418,8 @@ const Sidebar = () => {
     egpList,
     connectionStatus,
     globalDashboard,
+    selectedPnlEcoMad,
+    isHistoricalDate,
   } = useTrading();
   const { user, logout } = useAuth();
 
@@ -444,10 +454,13 @@ const Sidebar = () => {
   const alertCount = (dashboardRows || []).filter(
     (r) => r.netDailyAlert,
   ).length;
-  // P&L live (respire avec les prix) ; repli sur l'agrégat REST.
-  const pnlEco = parseFloat(
-    liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
-  );
+  // Date passée (J-1/J-5) → P&L éco de clôture (aligné courbe + TopBar) ;
+  // aujourd'hui → P&L live (respire avec les prix), repli sur l'agrégat REST.
+  const pnlEco = isHistoricalDate
+    ? parseFloat(selectedPnlEcoMad || 0)
+    : parseFloat(
+        liveTotals?.totalPlEcoMad ?? globalDashboard?.totalPlEcoMad ?? 0,
+      );
   const pnlPos = pnlEco >= 0;
   const pnlStr = fCompact(pnlEco);
 

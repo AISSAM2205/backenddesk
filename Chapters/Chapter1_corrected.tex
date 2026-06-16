@@ -1,0 +1,411 @@
+\chapter{Contexte général du projet}
+\label{chap:context}
+\minitoc
+
+% "*" makes the section unnumbered
+\section*{Introduction}
+
+\hspace{1cm} Ce chapitre présente le contexte général du projet. Il débute par une introduction à l'organisme d'accueil, en abordant son historique, ses activités principales et sa structure organisationnelle. Il met ensuite en lumière la place croissante des outils numériques dans le secteur du trading bancaire, où la rapidité et la fiabilité du suivi des portefeuilles sont devenues des enjeux stratégiques. L'attention se porte ensuite sur le projet en lui-même, à savoir le développement d'un tableau de bord de trading centralisé permettant au Bureau International de suivre en temps réel son portefeuille d'instruments financiers internationaux. Le chapitre se termine par une présentation détaillée des objectifs, du périmètre et de la méthodologie adoptée.
+
+\section{Présentation de l'organisation hôte}
+
+\subsection{Aperçu d'Attijariwafa Bank}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=6cm]{Logos/6151b274681bc1d99b3ff707_logo-attijariwafa-bank.png}
+    \caption{Attijariwafa Bank}
+    \label{fig:awb_logo}
+\end{figure}
+
+\subsection{Groupe Attijariwafa Bank}
+
+\subsubsection{Histoire du groupe}
+\hspace{1cm} Attijariwafa Bank [2], fondée en 2004 suite à la fusion de la Banque Commerciale du Maroc (BCM) et de Wafabank, a des origines qui remontent au début du XXe siècle. La BCM a été créée en 1911 après l'ouverture d'une succursale de la Banque Transatlantique à Tanger, tandis que Wafabank trouve ses origines dans la Compagnie Française de Crédit et de Banque (CFCB), qui avait ouvert une agence à Tanger en 1904. Au fil des années, les deux institutions ont été à l'avant-garde du secteur bancaire marocain, Wafabank étant entrée en bourse en 1993 et la BCM ayant été désignée « Première Banque Privée du Royaume » en 1987.
+
+Après la fusion, la présence géographique d'Attijariwafa Bank s'est étendue au-delà du Maroc, vers l'Afrique, l'Europe et le Moyen-Orient. À ce jour, en septembre 2024, la banque est présente dans 27 pays, au service de plus de 12 millions de clients à travers un réseau de 7\,223 agences. Cette diversification reflète la volonté de la banque d'innover et de devenir un champion financier africain.
+
+\subsubsection{Gouvernance}
+Attijariwafa Bank applique des principes solides de gouvernance d'entreprise afin de garantir une gestion responsable et transparente. Le Conseil d'Administration, composé de 13 membres, est chargé de maintenir la stabilité financière de la banque. Il définit les grandes orientations stratégiques, notamment les plans de croissance au Maroc et à l'étranger, et supervise la gestion globale de la banque.
+
+Afin de favoriser une meilleure coordination entre les différents départements, la banque dispose d'un Comité de Direction et de Coordination. Ce comité se réunit chaque mois et regroupe 25 hauts responsables ainsi que des membres du Comité Exécutif. Ensemble, ils coordonnent les grands projets et veillent à ce que toutes les entités de la banque soient alignées et avancent dans la même direction.
+
+\vspace{0.5cm}
+
+\noindent\textbf{Actionnaires de la banque Attijariwafa :}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=10cm]{Figures/Attijariwafa bank's shareholders.png}
+    \caption{Actionnaires de la banque Attijariwafa}
+    \label{fig:awb_shareholders}
+\end{figure}
+
+\subsection{Marques et activités}
+
+\subsubsection{L'bankalik}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=6cm]{Figures/L bankalik.png}
+    \caption{L'bankalik}
+    \label{fig:lbankalik}
+\end{figure}
+Première banque 100\% mobile, dédiée aussi bien aux jeunes qu'aux moins jeunes, L'bankalik représente une nouvelle génération de produits et services bancaires en ligne, offrant aux clients une expérience bancaire digitale fluide, intuitive et innovante.
+
+\subsubsection{Dar Al Moukawil}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=6cm]{Figures/Dar Al Moukawil.png}
+    \caption{Dar Al Moukawil}
+    \label{fig:dar_almoukawil}
+\end{figure}
+Afin de mieux accompagner les entrepreneurs et les porteurs de projets, Attijariwafa Bank a créé Dar Al Moukawil. Grâce à un réseau de centres dédiés et à la plateforme \textit{daralmoukawil.com}, les petites entreprises bénéficient gratuitement d'une large gamme d'avantages.
+
+\subsubsection{Fawatir}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=6cm]{Figures/Fawatir.png}
+    \caption{Fawatir}
+    \label{fig:fawatir}
+\end{figure}
+Lancé en partenariat avec des acteurs majeurs dans le domaine des moyens et services de paiement électronique, notamment le Centre Monétaire Interbancaire du Maroc (CMI) et le Mobile Commerce (MTC), Fawatir relie les facturiers, les administrations et les entreprises aux points de vente physiques, afin de leur permettre de collecter des créances, des taxes et des transactions en espèces de manière plus simple et plus sécurisée.
+
+\subsection{Filiales nationales et internationales}
+\noindent\textbf{Les filiales de la banque Attijariwafa au Maroc}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=14cm]{Figures/Attijariwafa bank's Moroccan subdiaries.png}
+    \caption{Les filiales de la banque Attijariwafa au Maroc}
+    \label{fig:awb_maroc}
+\end{figure}
+
+\noindent\textbf{Les filiales internationales de la banque Attijariwafa}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=12cm]{Figures/Attijariwafa bank's international subdiaries.png}
+    \caption{Les filiales internationales de la banque Attijariwafa}
+    \label{fig:awb_international}
+\end{figure}
+
+\subsection{Les services en ligne d'Attijariwafa Bank}
+Attijariwafa Bank dispose de l'une des infrastructures informatiques les plus avancées et les plus étendues parmi les banques au Maroc. Grâce à son expertise technologique, le Groupe propose une large gamme de services financiers et non financiers en ligne [3], adaptés aux besoins en constante évolution de ses clients. Certains de ces services sont présentés ci-dessous :
+\begin{itemize}
+    \item banque en ligne et services à distance ;
+    \item relations avec les investisseurs ;
+    \item développement en Afrique ;
+    \item orientation des étudiants.
+\end{itemize}
+
+\subsection{Organigramme}
+Attijariwafa Bank dispose d'une structure organisationnelle bien définie et complète, comme illustré dans le schéma ci-dessous :
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Figures/Organigramme-AWB.png}
+    \caption{Organigramme d'Attijariwafa Bank}
+    \label{fig:awb_organigramme}
+\end{figure}
+Il s'agit de la division Transformation, Innovation, Technologies et Opérations (TITO), dont fait partie l'équipe avec laquelle je travaille.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=8cm]{Figures/Attijariwafa bank's Organizational Chart.png}
+    \caption{Organigramme d'Attijariwafa Bank (pôle TITO)}
+    \label{fig:awb_tito}
+\end{figure}
+
+%=============================================================
+% SECTIONS ADAPTÉES AU PROJET
+%=============================================================
+
+\subsection{Bureau International --- Trading Desk}
+
+\hspace{1cm} Le Bureau International d'Attijariwafa Bank est la structure dédiée au négoce et à la gestion des instruments financiers libellés en devises étrangères. Il opère sur les marchés de capitaux internationaux et gère un portefeuille diversifié composé de :
+
+\begin{itemize}
+    \item \textbf{EuroBonds :} obligations souveraines et corporatives libellées en EUR ou USD (par exemple MOROC, OCP) ;
+    \item \textbf{Credit Linked Notes (CLN) :} produits dérivés de crédit et instruments structurés ;
+    \item \textbf{Egyptian Government Papers (EGP) :} bons du Trésor égyptiens et obligations souveraines libellés en livre égyptienne ;
+    \item \textbf{Futures de taux :} instruments de couverture (FVZ5, TYZ5, RXZ5) pour la gestion de l'exposition aux taux d'intérêt ;
+    \item \textbf{Opérations de change :} trading FX et gestion du risque de change multi-devises (USD, EUR, EGP, MAD).
+\end{itemize}
+
+\hspace{1cm} Le desk assure quotidiennement le suivi du P\&L comptable et économique, le contrôle des limites réglementaires et le reporting à la direction des marchés.
+
+%-------------------------------------------------------------
+\section{Infrastructure et solutions technologiques}
+
+\subsection{Infrastructure technologique}
+
+\hspace{1cm} Attijariwafa Bank dispose de l'une des infrastructures technologiques les plus avancées du secteur bancaire africain, comprenant :
+
+\begin{itemize}
+    \item des systèmes de trading connectés aux principales plateformes mondiales (Bloomberg, Reuters) ;
+    \item une architecture applicative multi-tiers pour les applications critiques métier ;
+    \item des solutions de cloud privé sécurisé et à haute disponibilité ;
+    \item des systèmes de gestion des risques et de contrôle des limites en temps réel ;
+    \item des outils de reporting et de conformité automatisés.
+\end{itemize}
+
+\subsection{Solutions de trading et marchés financiers}
+
+\hspace{1cm} Les services technologiques dédiés au trading comprennent :
+
+\begin{itemize}
+    \item des plateformes de trading multi-actifs et multi-devises ;
+    \item des systèmes de gestion de portefeuille institutionnel ;
+    \item des outils d'analyse de marché et de pricing en temps réel ;
+    \item des solutions de risk management et de contrôle des limites réglementaires ;
+    \item des systèmes de post-trade, de réconciliation et de settlement automatisé.
+\end{itemize}
+
+\hspace{1cm} C'est dans ce contexte technologique qu'a émergé le besoin d'un tableau de bord centralisé pour le Bureau International, permettant un suivi en temps réel et une gestion unifiée du portefeuille d'instruments financiers internationaux.
+
+%-------------------------------------------------------------
+\section{Enjeux de la digitalisation dans le trading bancaire}
+
+\subsection{Transformation digitale du secteur financier}
+
+\hspace{1cm} La digitalisation a profondément transformé les pratiques bancaires, particulièrement dans le domaine du trading et de la gestion des instruments financiers. Les systèmes automatisés, conçus pour optimiser les processus de trading et d'analyse de risque, permettent aujourd'hui d'améliorer significativement :
+
+\begin{itemize}
+    \item la rapidité d'exécution et de valorisation des transactions ;
+    \item la précision des calculs de P\&L (comptable et économique) et des métriques de risque ;
+    \item la traçabilité et la conformité réglementaire ;
+    \item le pricing en temps réel des instruments financiers ;
+    \item la gestion automatisée des limites et des alertes.
+\end{itemize}
+
+\subsection{Défis technologiques spécifiques au trading}
+
+\subsubsection{Gestion des données de marché en temps réel}
+
+\hspace{1cm} Les traders ont besoin d'accéder instantanément aux données de marché actualisées pour :
+
+\begin{itemize}
+    \item effectuer le pricing des instruments (EuroBonds, CLN, EGP Bills, Futures) ;
+    \item calculer les métriques de risque (Duration, DV01, VaR 1 jour 99\%) ;
+    \item monitorer les spreads et les expositions en temps réel ;
+    \item gérer les positions et les limites réglementaires par trader.
+\end{itemize}
+
+\subsubsection{Besoins d'intégration multi-systèmes}
+
+\hspace{1cm} La complexité opérationnelle du desk international nécessite une intégration fluide entre :
+
+\begin{itemize}
+    \item les flux de données de marché temps réel (simulation interne ; intégration Bloomberg prévue en phase ultérieure) ;
+    \item les outils de risk management et de contrôle des limites ;
+    \item les systèmes de reporting réglementaire et d'audit ;
+    \item la gestion des identités et des accès (Keycloak, OAuth~2.0 / OpenID Connect).
+\end{itemize}
+
+\subsection{Impact de la modernisation sur l'efficacité opérationnelle}
+
+\hspace{1cm} L'adoption de technologies adaptées permet d'optimiser l'ensemble des processus du desk, comme le résume le tableau~\ref{tab:impact_digitalisation}.
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{>{\bfseries}l X X}
+\toprule
+Processus & \textbf{Avant digitalisation} & \textbf{Après modernisation} \\
+\midrule
+Calcul P\&L          & Processus manuel (macros VBA)  & Calcul automatique en temps réel \\
+Mise à jour des prix & Saisie manuelle quotidienne    & Flux temps réel (WebSocket) \\
+Reporting            & Génération manuelle sous Excel & Export automatisé (Excel / CSV) \\
+Contrôle des risques & Vérifications a posteriori     & Monitoring continu avec alertes \\
+Gestion des alertes  & Surveillance manuelle          & Notifications intelligentes \\
+\bottomrule
+\end{tabularx}
+\caption{Impact de la digitalisation sur les processus de trading}
+\label{tab:impact_digitalisation}
+\end{table}
+
+%-------------------------------------------------------------
+\section{Problématique et contexte du projet}
+
+\subsection{Analyse de l'existant --- limitations du système Excel}
+
+\subsubsection{Architecture actuelle}
+
+\hspace{1cm} Le Bureau International s'appuie actuellement sur un classeur Excel complexe comportant cinq feuilles principales :
+
+\begin{enumerate}
+    \item \textbf{Dashboard :} vue synthétique des positions, du P\&L agrégé et des métriques de performance, répartie sur plusieurs tableaux peu structurés ;
+    \item \textbf{Blotter :} saisie manuelle des opérations de trading et suivi des transactions ;
+    \item \textbf{Reporting :} génération des rapports réglementaires et des métriques de risque ;
+    \item \textbf{Data \& Compute :} calculs financiers complexes, formules de pricing et de valorisation ;
+    \item \textbf{Settings :} paramétrage système, constantes de marché et outils de débogage.
+\end{enumerate}
+
+\subsubsection{Défis opérationnels identifiés}
+
+\hspace{1cm} L'analyse approfondie de cet existant révèle des problèmes critiques qui impactent directement l'efficacité opérationnelle du desk, synthétisés dans le tableau~\ref{tab:limitations_excel}.
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{>{\bfseries\raggedright\arraybackslash}p{3cm} X X >{\raggedright\arraybackslash}p{2.2cm}}
+\toprule
+Problématique & \textbf{Impact opérationnel} & \textbf{Risque métier} & \textbf{Coût / Temps} \\
+\midrule
+Temps de calcul excessif (macros VBA fragiles) & Retard dans les décisions de trading & Opportunités de marché manquées & 10\% du temps IT \\
+Saisie manuelle des données   & Taux d'erreur élevé                      & Non-conformité réglementaire     & 0--15 erreurs/j \\
+Données de marché obsolètes   & Pricing imprécis des instruments         & Mauvaise valorisation du P\&L    & $\pm$2\% d'écart \\
+Accès mono-utilisateur        & Goulet d'étranglement organisationnel    & Continuité d'activité compromise & 1 utilisateur \\
+Absence de traçabilité        & Difficultés d'audit et de réconciliation & Risque réglementaire élevé       & Non mesurable \\
+\bottomrule
+\end{tabularx}
+\caption{Analyse détaillée des limitations du système Excel}
+\label{tab:limitations_excel}
+\end{table}
+
+\subsubsection{Impact sur les performances métier}
+
+\hspace{1cm} Ces limitations techniques se traduisent concrètement par :
+
+\begin{itemize}
+    \item \textbf{des retards opérationnels :} 5 minutes de calcul par mise à jour, contre moins de 15 secondes requises ;
+    \item \textbf{un risque d'erreur élevé :} taux d'erreur inacceptable en environnement de trading (supérieur à 0,4\%) ;
+    \item \textbf{un manque de réactivité :} impossibilité de monitorer les positions en continu ;
+    \item \textbf{une conformité limitée :} difficultés à respecter les exigences réglementaires (Bank Al-Maghrib, AMMC) ;
+    \item \textbf{une scalabilité restreinte :} incapacité à absorber la croissance des volumes et l'extension du périmètre d'instruments.
+\end{itemize}
+
+\subsection{Besoins métier identifiés}
+
+\subsubsection{Exigences fonctionnelles prioritaires}
+
+\hspace{1cm} Le Bureau International a exprimé des besoins fonctionnels précis :
+
+\begin{enumerate}
+    \item \textbf{Gestion temps réel des instruments :}
+    \begin{itemize}
+        \item EuroBonds : valorisation mark-to-market, calcul de duration et de convexité ;
+        \item CLN : pricing des produits structurés, gestion du risque de crédit ;
+        \item EGP Bills : suivi des bons du Trésor, calculs de rendement ;
+        \item Futures : valorisation MtM des positions de couverture (FVZ5, TYZ5, RXZ5).
+    \end{itemize}
+    \item \textbf{Système d'alertes intelligent :}
+    \begin{itemize}
+        \item dépassement de limites de risque par trader ;
+        \item variations de marché significatives ;
+        \item échéances et événements de crédit.
+    \end{itemize}
+    \item \textbf{Reporting automatisé :}
+    \begin{itemize}
+        \item rapports P\&L quotidiens (comptable et économique) ;
+        \item métriques de risque (VaR 1 jour 99\%, DV01, Duration, Expected Shortfall) ;
+        \item export Excel / CSV conforme aux standards de la direction des marchés ;
+        \item reporting réglementaire (Bank Al-Maghrib, AMMC).
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Exigences techniques et d'intégration}
+
+\begin{itemize}
+    \item \textbf{Architecture n-tiers :} backend Spring Boot (Java~17) et PostgreSQL~15, frontend React~18 ;
+    \item \textbf{Authentification et contrôle d'accès :} Keycloak (OAuth~2.0 / OpenID Connect), séparation des rôles Trader / Administrateur ;
+    \item \textbf{Temps réel :} WebSocket (protocole STOMP) pour les flux de prix et les notifications ;
+    \item \textbf{Simulation de marché :} service interne de simulation des prix, avec intégration Bloomberg prévue en phase ultérieure ;
+    \item \textbf{Performance :} temps de réponse inférieur à 2 secondes, disponibilité de 99,95\% ;
+    \item \textbf{Sécurité bancaire :} audit trail complet des opérations et chiffrement des données sensibles.
+\end{itemize}
+
+%-------------------------------------------------------------
+\section{Objectifs et portée du projet}
+
+\subsection{Objectif principal}
+
+\hspace{1cm} Développer une plateforme web full-stack moderne destinée au Bureau International d'Attijariwafa Bank, afin de remplacer le système Excel existant et d'optimiser les activités de suivi et de gestion du portefeuille d'instruments financiers internationaux.
+
+\subsection{Objectifs spécifiques}
+
+\subsubsection{Objectifs fonctionnels}
+
+\begin{enumerate}
+    \item \textbf{Digitalisation complète du workflow de trading :}
+    \begin{itemize}
+        \item saisie et validation automatisées des opérations ;
+        \item calculs financiers en temps réel (P\&L comptable et économique, métriques de risque) ;
+        \item génération automatique de rapports et d'analyses.
+    \end{itemize}
+    \item \textbf{Suivi des données de marché :}
+    \begin{itemize}
+        \item flux de prix en temps réel via WebSocket ;
+        \item mise à jour dynamique des métriques de risque (DV01, VaR, Duration) ;
+        \item calcul automatique des spreads et des P\&L latents.
+    \end{itemize}
+    \item \textbf{Optimisation de l'expérience utilisateur :}
+    \begin{itemize}
+        \item interfaces spécialisées pour traders et administrateurs (RBAC Keycloak) ;
+        \item tableaux de bord interactifs avec thème sombre / clair ;
+        \item notifications intelligentes et alertes contextuelles.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Objectifs techniques}
+
+\begin{enumerate}
+    \item \textbf{Architecture n-tiers robuste :}
+    \begin{itemize}
+        \item backend Spring Boot~3 / Java~17, API REST sécurisée ;
+        \item base de données PostgreSQL~15 avec un modèle de données financier complet ;
+        \item gestion des identités et des rôles via Keycloak (OAuth~2.0 / OpenID Connect).
+    \end{itemize}
+    \item \textbf{Performance et disponibilité :}
+    \begin{itemize}
+        \item temps de calcul : 5 minutes $\rightarrow$ moins de 15 secondes ;
+        \item taux d'erreur : variable $\rightarrow$ contrôlé et audité ;
+        \item disponibilité système : 99,95\%.
+    \end{itemize}
+    \item \textbf{Sécurité et conformité :}
+    \begin{itemize}
+        \item authentification forte via Keycloak ;
+        \item audit trail complet des opérations ;
+        \item conformité aux standards bancaires (Bank Al-Maghrib, AMMC).
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Périmètre du projet}
+
+\subsubsection{Fonctionnalités incluses}
+
+\hspace{1cm} Le périmètre fonctionnel du projet, organisé par module, est présenté dans le tableau~\ref{tab:perimetre}.
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabularx}{\textwidth}{>{\bfseries}l X X}
+\toprule
+Module & \textbf{Fonctionnalités} & \textbf{Bénéfices attendus} \\
+\midrule
+Dashboard        & Vue temps réel des positions, P\&L, métriques de risque & Prise de décision accélérée \\
+EuroBonds        & Pricing, duration, convexité, courbes de taux           & Valorisation précise des obligations \\
+CLN              & Pricing des dérivés de crédit                           & Gestion optimisée des produits complexes \\
+EGP Bills        & Bons du Trésor, calculs de rendement                    & Efficacité sur le marché égyptien \\
+Trade Blotter    & Saisie, validation et historique des opérations         & Traçabilité complète des transactions \\
+Risk Management  & VaR, limites, alertes                                   & Contrôle proactif des risques \\
+Reporting        & Rapports P\&L, réglementaire et de performance          & Automatisation de la conformité \\
+Administration   & Gestion des utilisateurs, des paramètres et de l'audit  & Gouvernance et contrôle \\
+\bottomrule
+\end{tabularx}
+\caption{Périmètre fonctionnel du projet}
+\label{tab:perimetre}
+\end{table}
+
+\subsubsection{Exclusions du périmètre}
+
+\hspace{1cm} Les éléments suivants ne sont pas inclus dans cette phase du projet :
+
+\begin{itemize}
+    \item le trading algorithmique automatisé ;
+    \item l'intégration avec les systèmes de règlement / livraison ;
+    \item le module de pricing de dérivés exotiques ;
+    \item les interfaces mobiles natives (iOS / Android) ;
+    \item l'intégration Bloomberg (prévue en phase ultérieure).
+\end{itemize}
+
+%=============================================================
+\section*{Conclusion}
+\hspace{1cm}
+Dans ce chapitre, nous avons présenté un aperçu complet de l'organisation hôte, en détaillant son histoire, sa gouvernance, ses marques et ses filiales. Nous avons mis en lumière le rôle du Bureau International --- Trading Desk ainsi que l'infrastructure technologique sur laquelle il s'appuie, avant d'analyser les limitations critiques du système Excel existant qui justifient le présent projet.
+
+De plus, nous avons exposé les enjeux de la digitalisation dans le secteur du trading bancaire, défini les besoins métier et techniques identifiés, et précisé les objectifs ainsi que le périmètre du projet. Le chapitre suivant présentera l'analyse détaillée des besoins et la conception de l'architecture de la solution retenue.

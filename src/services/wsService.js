@@ -1,8 +1,19 @@
 import { Client } from "@stomp/stompjs";
 
-// Backend Spring Boot écoute sur 8081 (cf. application.properties + proxy Vite).
-const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8081";
-const WS_URL = BASE.replace(/^http/, "ws") + "/ws";
+// Le REST passe par les chemins relatifs (/api/*) proxifiés par Vite, mais le
+// WebSocket STOMP a besoin d'une URL ABSOLUE ws(s)://host/ws.
+//   • VITE_API_BASE_URL renseigné  → on le réutilise (http→ws).
+//   • base VIDE en dev             → backend Spring Boot sur :8081.
+//   • base VIDE en prod            → même origine que la page (front=back).
+// NB : on utilise `||` (et non `??`) car VITE_API_BASE_URL vaut "" (chaîne vide)
+// dans .env — `??` ne l'aurait pas remplacé et l'URL serait devenue "/ws".
+const RAW_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const WS_URL = RAW_BASE
+  ? RAW_BASE.replace(/^http/, "ws") + "/ws"
+  : import.meta.env.DEV
+    ? "ws://localhost:8081/ws"
+    : (window.location.protocol === "https:" ? "wss://" : "ws://") +
+      window.location.host + "/ws";
 
 class WsService {
   constructor() {

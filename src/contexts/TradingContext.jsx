@@ -17,6 +17,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import api, { today } from "../services/api";
 import { wsService } from "../services/wsService";
@@ -320,9 +321,14 @@ function reducer(state, action) {
 /* ─── Provider ───────────────────────────────────────────────────── */
 export const TradingProvider = ({ children }) => {
   const [state, dispatch] = useReducer(reducer, initialState);
+  // Show full-screen spinner only on the very first load.
+  // Background refreshes (heartbeat, date change after init) run silently.
+  const initialLoadDone = useRef(false);
 
   const loadAll = useCallback(async (date) => {
-    dispatch({ type: "SET_LOADING", payload: true });
+    if (!initialLoadDone.current) {
+      dispatch({ type: "SET_LOADING", payload: true });
+    }
     dispatch({ type: "CLEAR_ERROR" });
 
     // Historique P&L : TOUJOURS 90 jours glissants jusqu'à AUJOURD'HUI,
@@ -444,6 +450,7 @@ export const TradingProvider = ({ children }) => {
         payload: "Erreur chargement : " + err.message,
       });
     } finally {
+      initialLoadDone.current = true;
       dispatch({ type: "SET_LOADING", payload: false });
     }
   }, []);

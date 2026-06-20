@@ -2286,7 +2286,7 @@ const ReportingView = () => {
                       <span style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)" }}>Objectif</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <div style={{ width: 18, height: 2, background: "#22C55E", borderRadius: 1 }} />
+                      <div style={{ width: 18, height: 2, background: pnl.total >= TOTAL_TARGET * yearProg ? "#22C55E" : "#60A5FA", borderRadius: 1 }} />
                       <span style={{ fontFamily: "var(--f-body)", fontSize: "0.58rem", color: "var(--tx3)" }}>Réalisé</span>
                     </div>
                   </div>

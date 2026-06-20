@@ -515,8 +515,6 @@ const TickerBar = () => {
     useTrading();
   // Lignes + agrégats ré-évalués en temps réel depuis le flux de marché.
   const { rows: liveRows, totals: liveTotals } = useLiveDesk();
-  const trackRef = useRef(null);
-  const [animDur, setAnimDur] = useState(90);
   const clock = useClock();
 
   // Limite eurobonds (EUR absolu) — source unique : useGovernance (piloté admin).
@@ -635,13 +633,43 @@ const TickerBar = () => {
     return arr;
   }, [positions, rates]);
 
-  /* auto-adjust scroll speed based on content length */
-  useEffect(() => {
-    if (trackRef.current) {
-      const halfW = trackRef.current.scrollWidth / 2;
-      setAnimDur(Math.round(Math.max(halfW / 90, 40)));
-    }
-  }, [items]);
+  /* Marquee 100 % CSS : l'animation `transform` tourne sur le thread compositeur
+     du navigateur — donc parfaitement fluide même quand le thread principal est
+     saturé (re-render horloge chaque seconde, intervalles FX, flux WebSocket).
+     C'est ce qui élimine le « blocage » d'une boucle requestAnimationFrame.
+
+     Pourquoi pas translateX(-50%) sur une piste unique de 2 copies : ce -50 %
+     est relatif à la largeur PROPRE de la piste, et la piste avait flex-grow:1.
+     Dès que le contenu est plus étroit que l'écran, la piste s'étire à 100 % du
+     viewport → -50 % ne vaut plus une copie → la boucle se décale/casse.
+
+     Solution robuste : DEUX groupes identiques côte à côte, chacun animé de
+     translateX(0) → translateX(-100%) de sa PROPRE largeur. -100 % = exactement
+     un groupe, par construction, indépendamment de tout étirement flex et sans
+     l'arrondi demi-pixel du -50 %. Les deux groupes démarrent ensemble (montés
+     au même render) → toujours synchrones → couture invisible.
+
+     La durée ne dépend que du nombre d'éléments (stable) et passe par la
+     variable CSS --mq-dur : un re-render qui ne change pas ce nombre ne réécrit
+     pas le style → l'animation n'est jamais relancée. */
+  const marqueeDur = `${Math.round(Math.max(items.length * 3.4, 45))}s`;
+  // Style partagé par les deux groupes — strictement identiques pour rester
+  // synchrones. Longhands (pas le shorthand `animation`) : changer seulement la
+  // durée via --mq-dur n'altère ni le nom ni n'entraîne de redémarrage.
+  const groupStyle = {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    whiteSpace: "nowrap",
+    height: "100%",
+    minWidth: "100%",
+    justifyContent: "space-around",
+    animationName: "ticker-scroll",
+    animationDuration: "var(--mq-dur, 60s)",
+    animationTimingFunction: "linear",
+    animationIterationCount: "infinite",
+    willChange: "transform",
+  };
 
   /* renderItem closes over clock so sessions are always live */
   const renderItem = (item, i) => {
@@ -744,9 +772,8 @@ const TickerBar = () => {
 
       {/* Left fade */}
 
-      {/* Scrolling track */}
+      {/* Scrolling viewport — porte la variable de durée partagée par les groupes */}
       <div
-        ref={trackRef}
         style={{
           position: "relative",
           display: "flex",
@@ -757,9 +784,10 @@ const TickerBar = () => {
           alignItems: "center",
           whiteSpace: "nowrap",
           height: "100%",
-          willChange: "transform",
+          "--mq-dur": marqueeDur,
         }}
       >
+        {/* Left fade */}
         <div
           style={{
             position: "absolute",
@@ -785,26 +813,11 @@ const TickerBar = () => {
             pointerEvents: "none",
           }}
         />
-        <div
-          ref={trackRef}
-          style={{
-            position: "relative",
-            display: "flex",
-            flex: "1 0 auto",
-            flexShrink: 0,
-            alignItems: "center",
-            whiteSpace: "nowrap",
-            height: "100%",
-            animation: `ticker-scroll ${animDur}s linear infinite`,
-            willChange: "transform",
-          }}
-        >
-          <span style={{ display: "inline-flex", alignItems: "center" }}>
-            {segments}
-          </span>
-          <span style={{ display: "inline-flex", alignItems: "center" }}>
-            {segments}
-          </span>
+        {/* Deux groupes identiques côte à côte, chacun animé de 0 → -100 % de sa
+            propre largeur. Boucle sans couture, indépendante de tout étirement. */}
+        <div style={groupStyle}>{segments}</div>
+        <div style={groupStyle} aria-hidden="true">
+          {segments}
         </div>
       </div>
 
@@ -839,8 +852,8 @@ const TickerBar = () => {
 
       <style>{`
         @keyframes ticker-scroll {
-          0%   { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
+          0%   { transform: translate3d(0, 0, 0); }
+          100% { transform: translate3d(-100%, 0, 0); }
         }
         @keyframes ticker-blink {
           0%, 100% { opacity: 1; }

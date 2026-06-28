@@ -199,60 +199,6 @@ function computeGlobal(rows) {
   };
 }
 
-/* ─── Synthetic pnlDailyHistory ──────────────────────────────────────
-   Fallback activé quand /api/pnl-daily renvoie vide ou échoue.
-   Modèle AR(1) identique au seeder Java : drift 230k MAD, vol 1.75M MAD,
-   graine fixe 20260609 → courbe stable et crédible à chaque rendu.     */
-function _syntheticPnlHistory() {
-  // Mulberry32 seeded PRNG — déterministe entre les rerenders
-  let s = 20260609;
-  const rand = () => {
-    s |= 0; s = (s + 0x6D2B79F5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  // Box-Muller → distribution gaussienne
-  const randn = () => {
-    const u = rand() || 1e-10, v = rand();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-  };
-
-  // 60 jours ouvrés en ordre croissant, se terminant à hier
-  const days = [];
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - 1); // hier
-  while (days.length < 60) {
-    if (d.getDay() !== 0 && d.getDay() !== 6)
-      days.unshift(d.toISOString().split("T")[0]);
-    d.setDate(d.getDate() - 1);
-  }
-
-  const BASE = 13_500_000, DRIFT = 230_000, VOL = 1_750_000, PHI = 0.55;
-  let cum = BASE, prev = 0;
-  return days.map((snapshotDate, i) => {
-    let shock = randn() * VOL;
-    if (rand() < 0.08) shock *= 2.4; // choc fat-tail ~8 % des jours
-    const dayPnl  = i === 0 ? 0 : DRIFT + PHI * (prev - DRIFT) + shock;
-    prev = dayPnl;
-    cum += dayPnl;
-    const pnlJourMad = Math.round(i === 0 ? DRIFT : dayPnl);
-    const pnlEcoMad  = Math.round(cum);
-    const dt  = new Date(snapshotDate + "T00:00:00");
-    const jan1 = new Date(dt.getFullYear(), 0, 1);
-    const doy = Math.floor((dt - jan1) / 86400000) + 1;
-    return {
-      snapshotDate,
-      pnlJourMad,
-      pnlEcoMad,
-      finTotalMad:  130_000 * doy,
-      finUsdMad:    109_000 * doy,
-      finEurMad:     21_000 * doy,
-    };
-  });
-}
-
 /* ─── Reducer ────────────────────────────────────────────────────── */
 const initialState = {
   activeInstrument: "portfolio",
@@ -429,18 +375,17 @@ export const TradingProvider = ({ children }) => {
       });
 
       // ── Historical P&L (for line chart) ─────────────────────────
-      // Fallback synthétique si le backend renvoie vide ou échoue :
-      // garantit que P&L Mensuel, Drawdown et Cumulatif s'affichent
-      // même hors connexion (même modèle AR(1) que le seeder Java).
+      // SOURCE UNIQUE : l'historique persisté backend (/api/pnl-daily). Si le
+      // backend renvoie vide → on laisse VIDE. JAMAIS de données fabriquées :
+      // les écrans dégradent honnêtement (la courbe Portfolio affiche son repli
+      // « estimé » ancré sur le P&L RÉEL ; les stats de risque VaR/ES affichent
+      // « données insuffisantes »). Évite tout chiffre figé sous Bloomberg.
       {
         const backendData =
           pnlDailyRes.status === "fulfilled"
             ? pnlDailyRes.value.data || []
             : [];
-        dispatch({
-          type: "SET_PNL_DAILY",
-          payload: backendData.length ? backendData : _syntheticPnlHistory(),
-        });
+        dispatch({ type: "SET_PNL_DAILY", payload: backendData });
       }
 
       dispatch({ type: "SET_LAST_UPDATE", payload: new Date() });
@@ -473,6 +418,10 @@ export const TradingProvider = ({ children }) => {
         dispatch({ type: "SET_CONNECTION_STATUS", payload: event.status });
       } else if (event.type === "DATA") {
         loadAll(state.selectedDate);
+      } else if (event.type === "RATES") {
+        // Taux FX poussés en temps réel → on rafraîchit le bandeau sans
+        // recharger tous les agrégats (léger, à la cadence du tick).
+        dispatch({ type: "SET_RATES", payload: event.payload });
       }
     });
 

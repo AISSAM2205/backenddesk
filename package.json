@@ -18,11 +18,13 @@
     "antd": "^6.4.3",
     "axios": "^1.6.0",
     "dayjs": "^1.11.21",
+    "keycloak-js": "^26.2.4",
     "lucide-react": "^0.400.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

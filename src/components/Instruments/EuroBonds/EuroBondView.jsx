@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { Button, Select as AntSelect, Dropdown } from "antd";
 const { Option } = AntSelect;
-import * as XLSX from "xlsx";
+import { XLSX, styleWorkbook } from "../../../utils/xlsxStyle";
 import { useTrading } from "../../../contexts/TradingContext";
 import useLiveDesk from "../../../hooks/useLiveDesk";
 import api from "../../../services/api";
@@ -812,6 +812,7 @@ const EuroBondView = () => {
     XLSX.utils.book_append_sheet(wb, wsSpread, "G-Spreads");
 
     const ts = new Date().toISOString().slice(0, 16).replace("T", "_").replace(":", "h");
+    styleWorkbook(wb);
     XLSX.writeFile(wb, `eurobonds_${selectedDate}_${ts}.xlsx`);
   };
 

@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { Button, Input, Select as AntSelect } from "antd";
 const { Option } = AntSelect;
-import * as XLSX from "xlsx";
+import { XLSX, styleWorkbook } from "../../utils/xlsxStyle";
 import api from "../../services/api";
 import { useTrading } from "../../contexts/TradingContext";
 import {
@@ -1117,6 +1117,7 @@ const BlotterTable = () => {
     wsStats["!cols"] = [{ wch: 24 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, wsStats, "Statistiques");
 
+    styleWorkbook(wb);
     XLSX.writeFile(wb, `blotter_${ts}.xlsx`);
   }, [sorted]);
 

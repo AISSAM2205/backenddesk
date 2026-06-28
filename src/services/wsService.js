@@ -60,6 +60,18 @@ class WsService {
           }
         });
 
+        // Taux de référence (FX spot) poussés en continu par le backend.
+        // Émis comme "RATES" → TradingContext met à jour le bandeau en direct,
+        // sans dépendre du heartbeat (30 s).
+        this.client.subscribe("/topic/rates", (message) => {
+          try {
+            const payload = JSON.parse(message.body);
+            this._emit({ type: "RATES", payload });
+          } catch {
+            /* ignore */
+          }
+        });
+
         // Gouvernance : poussé par AdminController après toute modification
         // de limite/objectif. GovernanceContext s'y abonne pour mettre à jour
         // le trader instantanément, sans refresh, quel que soit le poste.

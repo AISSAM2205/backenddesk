@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Button, Card, Tag, Empty, Alert, Statistic } from "antd";
+import api from "../../services/api";
 import { useTrading } from "../../contexts/TradingContext";
 import {
   AlertTriangle,
@@ -105,38 +106,6 @@ const StatCard = ({ label, value, sub, valColor, trend }) => {
   );
 };
 
-/* ─── DV01 Bar ───────────────────────────────────────────────────── */
-const Dv01Bar = ({ value, maxVal }) => {
-  const pct =
-    maxVal > 0
-      ? Math.min((Math.abs(parseFloat(value || 0)) / maxVal) * 100, 100)
-      : 0;
-  return (
-    <div
-      style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 120 }}
-    >
-      <div className="progress-track" style={{ flex: 1 }}>
-        <div
-          className="progress-fill"
-          style={{ width: `${pct}%`, background: "#1E7FFF" }}
-        />
-      </div>
-      <span
-        style={{
-          fontFamily: "var(--f-mono)",
-          fontSize: "0.65rem",
-          color: "#60A5FA",
-          width: 52,
-          textAlign: "right",
-          flexShrink: 0,
-        }}
-      >
-        {fN(Math.abs(parseFloat(value || 0)), 0)}
-      </span>
-    </div>
-  );
-};
-
 /* ─── Rate scenario constants ───────────────────────────────────── */
 const RATE_SCENARIOS = [
   { label: "−100bp", delta: -100 },
@@ -181,6 +150,30 @@ const RiskView = () => {
   const [sortDir, setSortDir] = useState("desc");
   const [showAll, setShowAll] = useState(false);
 
+  // Grille de scénarios calculée côté backend (source unique de vérité).
+  // Repli silencieux sur le calcul local si l'API est indisponible.
+  const [scenGrid, setScenGrid] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    api.risk
+      .getScenarios(selectedDate || undefined)
+      .then((res) => {
+        if (alive && res?.data) setScenGrid(res.data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [selectedDate]);
+  // Index des scénarios backend par choc (bp) pour lecture directe du P&L.
+  const scenByDelta = useMemo(() => {
+    const m = {};
+    (scenGrid?.scenarios || []).forEach((s) => {
+      m[s.deltaBp] = s;
+    });
+    return m;
+  }, [scenGrid]);
+
   const handleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -218,19 +211,27 @@ const RiskView = () => {
 
   const displayRows = showAll ? rows : rows.slice(0, 20);
 
-  const totalDv01 = rows.reduce((s, r) => s + parseFloat(r.dv01Bond || 0), 0);
-  const maxDv01 = rows.reduce(
-    (s, r) => Math.max(s, Math.abs(parseFloat(r.dv01Bond || 0))),
+  // Σ DV01 et Σ(convexité × nominal) : backend prioritaire, repli local.
+  const totalDv01Local = rows.reduce(
+    (s, r) => s + parseFloat(r.dv01Bond || 0),
     0,
   );
-  const dur =
-    portfolioDuration ?? parseFloat(globalDashboard?.portfolioDuration || 0);
-  // Sum of (convexity × nominal) for convexity-adjusted PnL: ΔP = -DV01×Δbp + 0.5×ΣC×N×(Δbp/10000)²
-  const totalConvexDollar = rows.reduce((s, r) => {
+  const totalConvexDollarLocal = rows.reduce((s, r) => {
     const c = parseFloat(r.convexity || 0);
     const n = parseFloat(r.netNominal || 0);
     return s + (isNaN(c) || isNaN(n) ? 0 : c * n);
   }, 0);
+  const totalDv01 =
+    scenGrid?.totalDv01Usd != null
+      ? parseFloat(scenGrid.totalDv01Usd)
+      : totalDv01Local;
+  // Sum of (convexity × nominal) for convexity-adjusted PnL: ΔP = -DV01×Δbp + 0.5×ΣC×N×(Δbp/10000)²
+  const totalConvexDollar =
+    scenGrid?.totalConvexDollar != null
+      ? parseFloat(scenGrid.totalConvexDollar)
+      : totalConvexDollarLocal;
+  const dur =
+    portfolioDuration ?? parseFloat(globalDashboard?.portfolioDuration || 0);
   const alerts = dashboardRows.filter((r) => r.netDailyAlert);
   const buySignals = dashboardRows.filter((r) => r.decision === "BUY");
 
@@ -426,13 +427,20 @@ const RiskView = () => {
               }}
             >
               {RATE_SCENARIOS.map(({ label, delta }) => {
-                const usdMad = parseFloat(rates?.usdMad || USD_MAD_REF);
+                const usdMad =
+                  scenGrid?.usdMad != null
+                    ? parseFloat(scenGrid.usdMad)
+                    : parseFloat(rates?.usdMad || USD_MAD_REF);
+                // P&L par scénario : backend prioritaire (b), repli local.
+                const b = scenByDelta[delta];
                 const deltaFrac = delta / 10000; // Δy en décimal
-                const pnlUsdLin = -totalDv01 * delta;
-                const convAdj = 0.5 * totalConvexDollar * deltaFrac * deltaFrac; // ½·ΣC·N·Δy²
-                const pnlUsdAdj = pnlUsdLin + convAdj;
-                const pnlMadLin = pnlUsdLin * usdMad;
-                const pnlMadAdj = pnlUsdAdj * usdMad;
+                const pnlUsdLin = b ? b.pnlUsdLin : -totalDv01 * delta;
+                const convAdj = b
+                  ? b.convAdj
+                  : 0.5 * totalConvexDollar * deltaFrac * deltaFrac; // ½·ΣC·N·Δy²
+                const pnlUsdAdj = b ? b.pnlUsdAdj : pnlUsdLin + convAdj;
+                const pnlMadLin = b ? b.pnlMadLin : pnlUsdLin * usdMad;
+                const pnlMadAdj = b ? b.pnlMadAdj : pnlUsdAdj * usdMad;
                 const col = delta > 0 ? "var(--loss)" : "var(--profit)";
                 const diffMad = pnlMadAdj - pnlMadLin;
                 const absMax = totalDv01 * 100 * usdMad;
@@ -732,15 +740,6 @@ const RiskView = () => {
                   <Th k="netNominal" label="Nominal M" right />
                   <Th k="modifiedDuration" label="Duration" right />
                   <Th k="ytmMid" label="YTM%" right />
-                  <th
-                    style={{
-                      textAlign: "right",
-                      cursor: "default",
-                      color: "var(--tx3)",
-                    }}
-                  >
-                    DV01 Bar
-                  </th>
                   <Th k="dv01Bond" label="DV01 $/bp" right />
                   <Th k="hedgeRatio" label="Hedge%" right />
                   <Th k="gSpreadBid" label="Bid bp" right />
@@ -858,9 +857,6 @@ const RiskView = () => {
                         }}
                       >
                         {r.ytmMid != null ? `${fN(r.ytmMid, 3)}%` : "—"}
-                      </td>
-                      <td>
-                        <Dv01Bar value={r.dv01Bond} maxVal={maxDv01} />
                       </td>
                       <td
                         style={{
@@ -1042,7 +1038,6 @@ const RiskView = () => {
                   >
                     {fN(dur, 4)}
                   </td>
-                  <td />
                   <td />
                   <td
                     style={{

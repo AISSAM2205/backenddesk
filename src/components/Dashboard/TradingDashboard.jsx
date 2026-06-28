@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "antd";
 import { useTrading } from "../../contexts/TradingContext";
 import Sidebar from "./Sidebar";
@@ -7,8 +8,52 @@ import MainContent from "./MainContent";
 import TickerBar from "./TickerBar";
 import { RefreshCw, AlertTriangle, Activity } from "lucide-react";
 
+// Écrans valides — doit correspondre EXACTEMENT aux "case" de MainContent.jsx
+// et aux "id" de la Sidebar (vérifiés un par un).
+const SCREENS = [
+  "portfolio", "eurobonds", "cln", "egp", "tbills",
+  "futures", "pricing", "blotter", "risk", "reporting", "recon",
+];
+
 const TradingDashboard = () => {
-  const { loading, error, refresh } = useTrading();
+  const { loading, error, refresh, activeInstrument, setActiveInstrument } =
+    useTrading();
+  const navigate = useNavigate();
+  const params = useParams();
+  // Segment d'URL après /trader/ (route déclarée "/trader/*" dans App.jsx)
+  const urlScreen = (params["*"] || "").split("/")[0];
+  // Garde anti-écho : mise à true quand on synchronise l'état DEPUIS l'URL, pour
+  // que l'effet « état → URL » ne re-navigue PAS en réaction. C'est ce qui élimine
+  // la boucle qui faisait sauter l'URL toute seule (ex. eurobonds → risk).
+  const fromUrl = useRef(false);
+
+  // ── URL → état : navigation par URL (deep-link, Précédent/Suivant, F5) ──
+  useEffect(() => {
+    if (urlScreen && SCREENS.includes(urlScreen)) {
+      if (urlScreen !== activeInstrument) {
+        fromUrl.current = true; // ce changement d'état vient de l'URL
+        setActiveInstrument(urlScreen);
+      }
+    } else {
+      // URL sans écran (/trader) ou écran invalide → normalisation propre
+      navigate(`/trader/${activeInstrument}`, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlScreen]);
+
+  // ── État → URL : UNIQUEMENT sur un vrai clic Sidebar ──
+  // Si le changement d'état a été provoqué par l'URL (fromUrl=true), on NE
+  // re-navigue pas → pas d'écho, pas de boucle, pas de saut d'URL automatique.
+  useEffect(() => {
+    if (fromUrl.current) {
+      fromUrl.current = false;
+      return;
+    }
+    if (activeInstrument && activeInstrument !== urlScreen) {
+      navigate(`/trader/${activeInstrument}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInstrument]);
 
   if (loading) {
     return (

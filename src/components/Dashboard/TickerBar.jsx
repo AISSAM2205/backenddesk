@@ -652,10 +652,34 @@ const TickerBar = () => {
      La durée ne dépend que du nombre d'éléments (stable) et passe par la
      variable CSS --mq-dur : un re-render qui ne change pas ce nombre ne réécrit
      pas le style → l'animation n'est jamais relancée. */
-  const marqueeDur = `${Math.round(Math.max(items.length * 3.4, 45))}s`;
+  // ── Snapshot du bandeau (pattern « ticker » professionnel) ─────────────────
+  // On ne reconstruit le contenu défilant que toutes les 4 s, PAS à chaque tick
+  // WebSocket (~800 ms). Sinon la piste animée est repeinte en continu → le
+  // compositeur saccade (« se bloque »). Ici le scroll reste parfaitement fluide ;
+  // les valeurs se rafraîchissent par paliers de 4 s (comportement d'un vrai
+  // bandeau de marché). L'horloge, elle, reste live (gérée à part).
+  const liveSnap = {
+    items,
+    totals: liveTotals,
+    posCount: positions.length,
+    alerts,
+    buyCount,
+    limitPct,
+  };
+  const snapRef = useRef(liveSnap);
+  snapRef.current = liveSnap;
+  const [snap, setSnap] = useState(liveSnap);
+  useEffect(() => {
+    const id = setInterval(() => setSnap(snapRef.current), 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  const marqueeDur = `${Math.round(Math.max(snap.items.length * 3.4, 45))}s`;
   // Style partagé par les deux groupes — strictement identiques pour rester
   // synchrones. Longhands (pas le shorthand `animation`) : changer seulement la
   // durée via --mq-dur n'altère ni le nom ni n'entraîne de redémarrage.
+  // Animation portée par la classe globale .ticker-marquee (index.css) → jamais
+  // ré-injectée par un re-render → ne redémarre pas. Ici, uniquement le layout.
   const groupStyle = {
     display: "flex",
     flexShrink: 0,
@@ -664,11 +688,6 @@ const TickerBar = () => {
     height: "100%",
     minWidth: "100%",
     justifyContent: "space-around",
-    animationName: "ticker-scroll",
-    animationDuration: "var(--mq-dur, 60s)",
-    animationTimingFunction: "linear",
-    animationIterationCount: "infinite",
-    willChange: "transform",
   };
 
   /* renderItem closes over clock so sessions are always live */
@@ -678,12 +697,12 @@ const TickerBar = () => {
         return (
           <HeadlineItem
             key={`h-${i}`}
-            g={liveTotals}
-            alerts={alerts}
-            posCount={positions.length}
+            g={snap.totals}
+            alerts={snap.alerts}
+            posCount={snap.posCount}
             clock={clock}
-            buyCount={buyCount}
-            limitPct={limitPct}
+            buyCount={snap.buyCount}
+            limitPct={snap.limitPct}
           />
         );
       case "position":
@@ -708,7 +727,7 @@ const TickerBar = () => {
     }
   };
 
-  const segments = items.map((item, i) => (
+  const segments = snap.items.map((item, i) => (
     <React.Fragment key={i}>
       {renderItem(item, i)}
       <Sep />
@@ -815,8 +834,8 @@ const TickerBar = () => {
         />
         {/* Deux groupes identiques côte à côte, chacun animé de 0 → -100 % de sa
             propre largeur. Boucle sans couture, indépendante de tout étirement. */}
-        <div style={groupStyle}>{segments}</div>
-        <div style={groupStyle} aria-hidden="true">
+        <div className="ticker-marquee" style={groupStyle}>{segments}</div>
+        <div className="ticker-marquee" style={groupStyle} aria-hidden="true">
           {segments}
         </div>
       </div>
@@ -850,16 +869,8 @@ const TickerBar = () => {
         </span>
       </div>
 
-      <style>{`
-        @keyframes ticker-scroll {
-          0%   { transform: translate3d(0, 0, 0); }
-          100% { transform: translate3d(-100%, 0, 0); }
-        }
-        @keyframes ticker-blink {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.30; }
-        }
-      `}</style>
+      {/* @keyframes ticker-scroll / ticker-blink déplacés en global (index.css)
+          → plus jamais ré-injectés par un re-render → l'animation ne redémarre pas. */}
     </div>
   );
 };

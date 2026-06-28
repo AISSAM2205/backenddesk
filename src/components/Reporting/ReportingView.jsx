@@ -1,6 +1,8 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button, Card, Tabs, Progress, Tag, Alert, Statistic, Tooltip, Badge, Divider } from "antd";
-import * as XLSX from "xlsx";
+import { XLSX, styleWorkbook } from "../../utils/xlsxStyle";
+import api from "../../services/api";
 import { useTrading } from "../../contexts/TradingContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGovernance } from "../../contexts/GovernanceContext";
@@ -827,10 +829,23 @@ const ReportingView = () => {
     rates,
     loading,
     refresh,
+    selectedDate,
   } = useTrading();
   const { user } = useAuth();
   const { annualTargets, exposureLimits } = useGovernance();
-  const [activeTab, setActiveTab] = useState("morning");
+  // Onglet déduit de l'URL (?tab=) → deep-linking + refresh-persistant.
+  // On garde les noms activeTab / setActiveTab : aucun autre code ne change.
+  const REPORT_TABS = [
+    "morning", "objectifs", "attribution", "scenarios", "historique", "limites",
+  ];
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab = REPORT_TABS.includes(tabParam) ? tabParam : "morning";
+  const setActiveTab = (id) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", id);
+    setSearchParams(next, { replace: true }); // ne pollue pas l'historique
+  };
 
   // Objectifs annuels — source unique : useGovernance (piloté admin, défauts centralisés).
   const TARGETS = useMemo(
@@ -854,6 +869,29 @@ const ReportingView = () => {
     central: 0,
     opt: -50,
   });
+
+  // Projection de scénarios calculée côté backend (source unique). Les chocs
+  // restent des entrées utilisateur : on refetch quand ils changent. Repli
+  // local si l'API est indisponible OU si l'écho des chocs ne correspond pas
+  // encore (réponse en vol) → l'affichage reste instantané et cohérent.
+  const [scenBackend, setScenBackend] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    api.reporting
+      .getScenarios({
+        date: selectedDate || undefined,
+        pess: scenShocks.pess,
+        central: scenShocks.central,
+        opt: scenShocks.opt,
+      })
+      .then((res) => {
+        if (alive && res?.data) setScenBackend(res.data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [selectedDate, scenShocks.pess, scenShocks.central, scenShocks.opt]);
 
   const year = new Date().getFullYear();
   const yearProg = useMemo(() => yearProgress(), []);
@@ -940,11 +978,28 @@ const ReportingView = () => {
   }, [pnlDailyHistory]);
 
   /* ── Risque de marché : VaR / Expected Shortfall / vol / drawdown ──
-     Construit uniquement à partir de l'historique de P&L journalier (MAD).
-     Méthodo : VaR paramétrique gaussienne (z·σ, centrée 0) + VaR historique
-     (percentile empirique de la distribution) + Expected Shortfall (CVaR,
-     moyenne de la queue de pertes). Aucune dépendance backend. */
-  const riskStats = useMemo(() => {
+     SOURCE UNIQUE : le backend (GET /api/risk/market, MarketRiskService).
+     Le calcul local ci-dessous (méthodo identique : VaR paramétrique
+     gaussienne z·σ + VaR historique par percentile empirique + Expected
+     Shortfall + max drawdown) ne sert plus que de REPLI si le backend est
+     indisponible — les chiffres restent donc identiques dans les deux cas. */
+  const [backendRisk, setBackendRisk] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    api.risk
+      .getMarket()
+      .then((res) => {
+        if (alive && res?.data?.sufficient) setBackendRisk(res.data);
+      })
+      .catch(() => {
+        /* repli silencieux sur le calcul local */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const localRiskStats = useMemo(() => {
     const daily = (pnlDailyHistory || [])
       .map((d) => parseFloat(d.pnlJourMad || 0))
       .filter((v) => !isNaN(v));
@@ -995,7 +1050,78 @@ const ReportingView = () => {
     };
   }, [pnlDailyHistory]);
 
+  // Backend prioritaire ; repli local si l'API est indisponible. Le DTO
+  // backend nomme le drawdown « maxDrawdown » → remappé en « maxDD » pour
+  // garder la même forme d'objet (le reste de l'écran est inchangé).
+  const riskStats = useMemo(() => {
+    if (backendRisk && backendRisk.sufficient) {
+      const b = backendRisk;
+      return {
+        mean: b.mean, std: b.std, annVol: b.annVol,
+        varParam99: b.varParam99, varParam95: b.varParam95,
+        varHist99: b.varHist99, varHist95: b.varHist95,
+        es975: b.es975, maxDD: b.maxDrawdown, nObs: b.nObs,
+      };
+    }
+    return localRiskStats;
+  }, [backendRisk, localRiskStats]);
+
   const scenarioData = useMemo(() => {
+    // Style UI (libellés/couleurs) — reste au front ; les NOMBRES viennent du backend.
+    const SCEN_META = {
+      pess:    { label: "Pessimiste", tag: "HAUSSE TAUX",   color: "var(--loss)",   bg: "rgba(255,43,96,0.06)" },
+      central: { label: "Central",    tag: "MARCHÉ STABLE",  color: "var(--cyan)",   bg: "rgba(0,202,255,0.05)" },
+      opt:     { label: "Optimiste",  tag: "BAISSE TAUX",    color: "var(--profit)", bg: "rgba(0,232,153,0.05)" },
+    };
+    const ASSET_META = {
+      moroc: { label: "Eurobond Maroc", color: "var(--eb)" },
+      ocp:   { label: "Eurobond OCP",   color: "#9B3EEF" },
+      cln:   { label: "CLN",            color: "var(--cln)" },
+      egp:   { label: "EGP Bills",      color: "var(--egp)" },
+    };
+    const SCEN_KEYS = ["pess", "central", "opt"];
+    const ASSET_KEYS = ["moroc", "ocp", "cln", "egp"];
+
+    // ── Source backend si les chocs échoés correspondent à l'état courant ──
+    const echoesMatch =
+      scenBackend &&
+      scenBackend.pess === scenShocks.pess &&
+      scenBackend.central === scenShocks.central &&
+      scenBackend.opt === scenShocks.opt;
+    if (echoesMatch) {
+      const arByKey = {};
+      (scenBackend.assetRows || []).forEach((a) => { arByKey[a.key] = a; });
+      const ASSET_ROWS = ASSET_KEYS.map((k) => ({
+        key: k, ...ASSET_META[k],
+        actual: arByKey[k]?.actual ?? 0,
+        carry: arByKey[k]?.carry ?? 0,
+        dv01Mad: arByKey[k]?.dv01Mad ?? 0,
+        dv01: arByKey[k]?.dv01 ?? 0,
+      }));
+      const scenarios = SCEN_KEYS.map((key) => {
+        const sb = (scenBackend.scenarios || []).find((s) => s.key === key);
+        const resByKey = {};
+        (sb?.assetResults || []).forEach((r) => { resByKey[r.key] = r; });
+        const assetResults = ASSET_ROWS.map((r) => ({
+          ...r,
+          rateImpact: resByKey[r.key]?.rateImpact ?? 0,
+          yeProjection: resByKey[r.key]?.yeProjection ?? (r.actual + r.carry),
+        }));
+        return {
+          key, ...SCEN_META[key], shockBps: scenShocks[key],
+          assetResults,
+          total: sb?.total ?? assetResults.reduce((s, r) => s + r.yeProjection, 0),
+        };
+      });
+      return {
+        scenarios, ASSET_ROWS,
+        remainDays: scenBackend.remainDays,
+        dv01TotalMad: scenBackend.dv01TotalMad,
+        dv01Total: scenBackend.dv01Total,
+      };
+    }
+
+    // ── Repli local (méthodo identique au backend) ──
     const n = f => parseFloat(f ?? 0);
     const remainDays = Math.max(0, 252 - tradingDays);
     const usdMad = parseFloat(rates?.usdMad || 9.251);
@@ -1003,11 +1129,7 @@ const ReportingView = () => {
     // DV01 is in the bond's native currency → convert each bond separately
     const dv01ToMad = r => n(r.dv01Bond) * ((r.currency || "USD").toUpperCase() === "EUR" ? eurMad : usdMad);
 
-    const SCENS = [
-      { key: "pess",    label: "Pessimiste", tag: "HAUSSE TAUX",    shockBps: scenShocks.pess,    color: "var(--loss)",   bg: "rgba(255,43,96,0.06)" },
-      { key: "central", label: "Central",    tag: "MARCHÉ STABLE",  shockBps: scenShocks.central, color: "var(--cyan)",   bg: "rgba(0,202,255,0.05)" },
-      { key: "opt",     label: "Optimiste",  tag: "BAISSE TAUX",    shockBps: scenShocks.opt,     color: "var(--profit)", bg: "rgba(0,232,153,0.05)" },
-    ];
+    const SCENS = SCEN_KEYS.map((key) => ({ key, ...SCEN_META[key], shockBps: scenShocks[key] }));
 
     const bondsMoroc = dashboardRows.filter(r => (r.subAsset || "").toLowerCase().includes("mor bond"));
     const bondsOcp   = dashboardRows.filter(r => (r.subAsset || "").toLowerCase().includes("ocp bond"));
@@ -1025,10 +1147,10 @@ const ReportingView = () => {
     const carryEgp   = tradingDays > 0 ? (pnl.egp / tradingDays) * remainDays : 0;
 
     const ASSET_ROWS = [
-      { key: "moroc", label: "Eurobond Maroc", actual: pnl.moroc, carry: carryMoroc, dv01Mad: dv01MorocMad, dv01: dv01Moroc, color: "var(--eb)" },
-      { key: "ocp",   label: "Eurobond OCP",   actual: pnl.ocp,   carry: carryOcp,   dv01Mad: dv01OcpMad,   dv01: dv01Ocp,   color: "#9B3EEF" },
-      { key: "cln",   label: "CLN",             actual: pnl.cln,   carry: carryCln,   dv01Mad: 0,            dv01: 0,         color: "var(--cln)" },
-      { key: "egp",   label: "EGP Bills",       actual: pnl.egp,   carry: carryEgp,   dv01Mad: 0,            dv01: 0,         color: "var(--egp)" },
+      { key: "moroc", ...ASSET_META.moroc, actual: pnl.moroc, carry: carryMoroc, dv01Mad: dv01MorocMad, dv01: dv01Moroc },
+      { key: "ocp",   ...ASSET_META.ocp,   actual: pnl.ocp,   carry: carryOcp,   dv01Mad: dv01OcpMad,   dv01: dv01Ocp },
+      { key: "cln",   ...ASSET_META.cln,   actual: pnl.cln,   carry: carryCln,   dv01Mad: 0,            dv01: 0 },
+      { key: "egp",   ...ASSET_META.egp,   actual: pnl.egp,   carry: carryEgp,   dv01Mad: 0,            dv01: 0 },
     ];
 
     return {
@@ -1045,7 +1167,7 @@ const ReportingView = () => {
       dv01TotalMad: dv01MorocMad + dv01OcpMad,
       dv01Total:    dv01Moroc + dv01Ocp,
     };
-  }, [dashboardRows, clnList, egpList, pnl, tradingDays, rates, scenShocks]);
+  }, [scenBackend, dashboardRows, clnList, egpList, pnl, tradingDays, rates, scenShocks]);
 
   const rows = useMemo(
     () =>
@@ -1561,6 +1683,7 @@ const ReportingView = () => {
     XLSX.utils.book_append_sheet(wb, wsRiskVar, "Risque VaR");
 
     /* ── ÉCRITURE ── */
+    styleWorkbook(wb);
     XLSX.writeFile(wb, `AWB_MorningReport_${year}_${now.toISOString().slice(0, 10)}.xlsx`);
   }, [
     rows,

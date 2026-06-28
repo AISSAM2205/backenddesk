@@ -965,3 +965,20 @@ html.light input[type="date"] {
 .accentbar-teal {
   background: var(--fut);
 }
+
+/* ── Ticker (bandeau bas) ────────────────────────────────────────────────────
+   Défini en GLOBAL (pas inline dans le composant) pour ne jamais être ré-injecté
+   par un re-render React → l'animation ne redémarre pas (fin du « blocage »).
+   La durée passe par la variable --mq-dur posée sur le conteneur. */
+@keyframes ticker-scroll {
+  0%   { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-100%, 0, 0); }
+}
+@keyframes ticker-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.30; }
+}
+.ticker-marquee {
+  animation: ticker-scroll var(--mq-dur, 60s) linear infinite;
+  will-change: transform;
+}

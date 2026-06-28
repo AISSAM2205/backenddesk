@@ -1,8 +1,10 @@
 package ma.attijariwafa.desk_international.controller;
 
 import lombok.RequiredArgsConstructor;
+import ma.attijariwafa.desk_international.dto.EgpBreakevenDto;
 import ma.attijariwafa.desk_international.entity.ExternalPnlSnapshot;
 import ma.attijariwafa.desk_international.repository.ExternalPnlSnapshotRepository;
+import ma.attijariwafa.desk_international.service.EgpBreakevenService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +17,7 @@ import java.util.List;
 public class ExternalController {
 
     private final ExternalPnlSnapshotRepository extRepo;
+    private final EgpBreakevenService egpBreakevenService;
 
     // GET /api/external/cln?date=2025-05-20
     // Retourne les positions CLN externes (gérées par desk structuré, snapshot)
@@ -32,6 +35,16 @@ public class ExternalController {
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return ResponseEntity.ok(resolve("EGP_BILL", date));
+    }
+
+    // GET /api/external/egp/breakeven?date=2025-05-20
+    // Seuils de rentabilité FX par deal EGP (BKV avec/sans financement, coussins,
+    // P&L FX approx.). Calcul backend — source unique (ex-EGPView).
+    @GetMapping("/egp/breakeven")
+    public ResponseEntity<EgpBreakevenDto> getEgpBreakeven(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.ok(egpBreakevenService.computeBreakeven(date));
     }
 
     // GET /api/external/all?date=2025-05-20

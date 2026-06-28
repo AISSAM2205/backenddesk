@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Button, Input } from "antd";
+import { Button } from "antd";
+import api from "../../../services/api";
 import { useTrading } from "../../../contexts/TradingContext";
-import { useAuth } from "../../../contexts/AuthContext";
 import {
   Coins,
   RefreshCw,
@@ -204,34 +204,33 @@ const SortIcon = ({ active, dir }) => {
   );
 };
 
-const EGP_SL_KEY = (uid) => `egp_stoploss_${uid || "default"}`;
-
 const EGPView = () => {
   const { egpList, rates, loading, refresh, selectedDate } = useTrading();
-  const { user } = useAuth();
+
+  // Breakeven FX calculé côté backend (source unique). Repli local si l'API
+  // est indisponible → l'écran reste fonctionnel, chiffres identiques.
+  const [egpBk, setEgpBk] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    api.external
+      .getEgpBreakeven(selectedDate || undefined)
+      .then((res) => {
+        if (alive && res?.data) setEgpBk(res.data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [selectedDate]);
+  const egpBkByIsin = useMemo(() => {
+    const m = {};
+    (egpBk?.deals || []).forEach((d) => {
+      m[d.isin] = d;
+    });
+    return m;
+  }, [egpBk]);
   const [sortKey, setSortKey] = useState("maturityDate");
   const [sortDir, setSortDir] = useState("asc");
-  const [stopLoss, setStopLoss] = useState(0);
-  const [slInput, setSlInput] = useState("");
-  const [showSlInput, setShowSlInput] = useState(false);
-
-  useEffect(() => {
-    const raw = localStorage.getItem(EGP_SL_KEY(user?.id));
-    const val = raw ? parseFloat(raw) : 0;
-    if (!isNaN(val) && val > 0) {
-      setStopLoss(val);
-      setSlInput(String(val / 1e6));
-    }
-  }, [user?.id]);
-
-  const saveStopLoss = () => {
-    const val = parseFloat(slInput) * 1e6;
-    if (!isNaN(val) && val >= 0) {
-      setStopLoss(val);
-      localStorage.setItem(EGP_SL_KEY(user?.id), String(val));
-      setShowSlInput(false);
-    }
-  };
 
   const handleSort = (k) => {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -409,139 +408,37 @@ const EGPView = () => {
           ))}
         </div>
 
-        {/* ── Stop-Loss Banner ── */}
-        {stopLoss > 0 && totals.plEcoMad < -stopLoss && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 10,
-              padding: "12px 16px",
-              borderRadius: 8,
-              background: "rgba(255,43,96,0.10)",
-              border: "1px solid rgba(255,43,96,0.35)",
-              animation: "pulse-live 2s ease infinite",
-            }}
-          >
-            <AlertTriangle
-              size={14}
-              style={{ color: "var(--loss)", flexShrink: 0, marginTop: 1 }}
-            />
-            <div>
-              <p
-                style={{
-                  fontFamily: "var(--f-disp)",
-                  fontWeight: 700,
-                  fontSize: "0.68rem",
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--loss)",
-                  marginBottom: 4,
-                }}
-              >
-                ⚠ STOP-LOSS EGP DÉCLENCHÉ
-              </p>
-              <p
-                style={{
-                  fontFamily: "var(--f-body)",
-                  fontSize: "0.72rem",
-                  color: "#FC8FA0",
-                }}
-              >
-                P&L Éco {fMAD(totals.plEcoMad)} MAD — Limite : −
-                {(stopLoss / 1e6).toFixed(1)}M MAD
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* ── Stop-Loss Config ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              fontFamily: "var(--f-disp)",
-              fontSize: "0.60rem",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "var(--tx3)",
-            }}
-          >
-            Stop-Loss EGP :
-          </span>
-          {showSlInput ? (
-            <>
-              <Input
-                type="number"
-                value={slInput}
-                onChange={(e) => setSlInput(e.target.value)}
-                placeholder="ex: 5 (M MAD)"
-                size="small"
-                style={{ width: 120 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") saveStopLoss();
-                  if (e.key === "Escape") setShowSlInput(false);
-                }}
-                autoFocus
-              />
-              <span
-                style={{
-                  fontFamily: "var(--f-body)",
-                  fontSize: "0.60rem",
-                  color: "var(--tx3)",
-                }}
-              >
-                M MAD
-              </span>
-              <Button
-                type="primary"
-                size="small"
-                onClick={saveStopLoss}
-              >
-                OK
-              </Button>
-              <Button
-                size="small"
-                onClick={() => setShowSlInput(false)}
-              >
-                ×
-              </Button>
-            </>
-          ) : (
-            <>
-              <span
-                style={{
-                  fontFamily: "var(--f-mono)",
-                  fontSize: "0.68rem",
-                  fontWeight: 600,
-                  color: stopLoss > 0 ? "var(--loss)" : "var(--tx3)",
-                }}
-              >
-                {stopLoss > 0
-                  ? `−${(stopLoss / 1e6).toFixed(1)}M MAD`
-                  : "— Non configuré"}
-              </span>
-              <Button
-                size="small"
-                onClick={() => {
-                  setSlInput(stopLoss > 0 ? String(stopLoss / 1e6) : "");
-                  setShowSlInput(true);
-                }}
-              >
-                Configurer
-              </Button>
-            </>
-          )}
-        </div>
-
         {/* ── FX Breakeven Panel ── */}
         {egpList.length > 0 &&
           (() => {
-            const spot = parseFloat(rates?.usdEgp || 50.85);
-            const sofr = parseFloat(rates?.sofr || 5.3) / 100;
+            // Paramètres de marché : backend prioritaire (cohérence), repli local.
+            const spot =
+              egpBk?.spot != null
+                ? egpBk.spot
+                : parseFloat(rates?.usdEgp || 50.85);
+            const sofr =
+              egpBk?.sofr != null
+                ? egpBk.sofr
+                : parseFloat(rates?.sofr || 5.3) / 100;
             const today = new Date();
 
             const deals = sorted.map((r) => {
+              // Deal calculé côté backend (source unique) si disponible.
+              const bk = egpBkByIsin[r.isin];
+              if (bk) {
+                return {
+                  ...r,
+                  fxEntry: bk.fxEntry,
+                  bkvSansFin: bk.bkvSansFin,
+                  bkvAvecFin: bk.bkvAvecFin,
+                  cushionSans: bk.cushionSans,
+                  cushionAvec: bk.cushionAvec,
+                  daysRem: bk.daysRem,
+                  yieldRate: bk.yieldRate,
+                  plFxApprox: bk.plFxApprox,
+                };
+              }
+              // ── Repli local (méthodo identique au backend) ──
               const yieldRate =
                 parseFloat(r.couponRate || 0) < 1
                   ? parseFloat(r.couponRate || 0)
@@ -787,16 +684,6 @@ const EGPView = () => {
                     flexWrap: "wrap",
                   }}
                 >
-                  <span
-                    style={{
-                      fontFamily: "var(--f-body)",
-                      fontSize: "0.57rem",
-                      color: "var(--tx3)",
-                    }}
-                  >
-                    BKV s/fin = FX_entrée × (1 + yield × jours/360) · BKV a/fin
-                    = FX_entrée × (1 + (yield − SOFR) × jours/360)
-                  </span>
                   <span
                     style={{
                       fontFamily: "var(--f-disp)",

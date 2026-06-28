@@ -33,6 +33,13 @@ public class GlobalDashboardDto {
     private BigDecimal totalDv01Usd;            // EB uniquement
     private BigDecimal portfolioDuration;       // EB uniquement (nominal-weighted)
 
+    // ── VaR 1 jour 99 % paramétrique (USD) — source unique backend ──────
+    // var1dUsd = |DV01| × z(99 %) × σ ; z = 2.33, σ = 7 bp/j (govvies + IG).
+    // Budget VaR interne du desk : 2,5 M$ avec plancher adaptatif.
+    private Double var1dUsd;                     // VaR 1j 99 % (USD)
+    private Double varBudgetUsd;                 // budget VaR (USD)
+    private Double varPct;                       // consommation du budget (%)
+
     // ── Donut / répartition par classe d'actifs ──────────────────────
     // Clés : "EUROBOND", "CLN", "EGP_BILL"
     private Map<String, BreakdownDto> breakdown;

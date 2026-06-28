@@ -83,6 +83,17 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             // sur les trades issus d'un seed antérieur → colonnes « Categ. » et
             // « Obligation/P&L » ne sont plus vides après simple redémarrage.
             backfillTradeColumns();
+            // Backfill SOFR 10Y : colonne sofr_10y ajoutée après coup (Hibernate
+            // ddl-auto) → NULL sur les lignes market_rates seedées avant. On la
+            // remplit pour que l'écran n'affiche plus une valeur codée en dur.
+            backfillSofr10Year();
+            // Backfill limites T-Bills : absentes des bases seedées avant l'ajout
+            // → l'écran T-Bills retombait sur un repli front figé (100/50 M).
+            backfillTbillLimits();
+            // Backfill duration MOROC 5.95 : valeur seedée trop basse (2.80)
+            // pour un bond 5 ans 5.95% → corrigée à ~4.25 (réaliste). Sinon
+            // duration/DV01/hedge/VaR restaient sous-estimés.
+            backfillMorocDuration();
             return;
         }
         if (forceReseed)
@@ -141,6 +152,80 @@ public class BloombergMockDataLoader implements ApplicationRunner {
         Long n = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM trade WHERE sub_asset = 'Future'", Long.class);
         return n != null ? n : 0L;
+    }
+
+    /**
+     * Backfill idempotent de SOFR 10Y. La colonne sofr_10y est ajoutée a
+     * posteriori (Hibernate ddl-auto) → NULL sur les lignes market_rates
+     * seedées avant. On ne touche QUE les lignes manquantes → sûr à chaque
+     * démarrage. Isolé : ne fait jamais échouer le boot.
+     */
+    private void backfillSofr10Year() {
+        try {
+            List<MarketRates> toFix = marketRatesRepo.findAll().stream()
+                    .filter(r -> r.getSofr10Year() == null)
+                    .toList();
+            if (toFix.isEmpty()) return;
+            toFix.forEach(r -> r.setSofr10Year(new BigDecimal("3.9000")));
+            marketRatesRepo.saveAll(toFix);
+            log.info("[Bloomberg Mock] ✓ Backfill sofr_10y sur {} ligne(s) market_rates.", toFix.size());
+        } catch (Exception e) {
+            log.warn("[Bloomberg Mock] Backfill sofr_10y ignoré : {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Backfill idempotent de la duration de MOROC 5.95 07/22/2031. La valeur
+     * seedée d'origine (2.7953) était trop basse pour un bond ~5 ans coupon
+     * 5.95% (modified duration réaliste ≈ 4.25). Comme c'est la plus grosse
+     * ligne du book, elle tirait à tort la duration du bucket 5-7 ans et la
+     * duration totale (et le DV01) vers le bas. On ne corrige QUE si l'ancienne
+     * valeur (&lt; 3.0) est présente → idempotent, ne réécrit jamais une valeur
+     * déjà corrigée ou saisie. Isolé : ne fait jamais échouer le boot.
+     */
+    private void backfillMorocDuration() {
+        try {
+            riskMetricsRepo.findTopByInstrumentIsinOrderByMetricsDateDesc("XS2595028452")
+                    .filter(rm -> rm.getModifiedDuration() != null
+                            && rm.getModifiedDuration().compareTo(new BigDecimal("3.0")) < 0)
+                    .ifPresent(rm -> {
+                        rm.setModifiedDuration(new BigDecimal("4.250000"));
+                        rm.setConvexity(new BigDecimal("23.00"));
+                        riskMetricsRepo.save(rm);
+                        log.info("[Bloomberg Mock] ✓ Backfill duration MOROC 5.95 : 2.80 → 4.25 (réaliste).");
+                    });
+        } catch (Exception e) {
+            log.warn("[Bloomberg Mock] Backfill duration MOROC 5.95 ignoré : {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Backfill idempotent des limites d'exposition T-Bills (USD + EUR). Elles
+     * n'étaient pas seedées à l'origine → l'écran T-Bills retombait sur un repli
+     * front figé (100/50 M). On ne les ajoute QUE si absentes → sûr à chaque
+     * démarrage. Isolé : ne fait jamais échouer le boot.
+     */
+    private void backfillTbillLimits() {
+        try {
+            Set<String> cats = limitRepo.findAll().stream()
+                    .map(PortfolioLimit::getCategory)
+                    .collect(Collectors.toSet());
+            LocalDate eff = LocalDate.of(LocalDate.now().getYear(), 1, 1);
+            List<PortfolioLimit> toAdd = new ArrayList<>();
+            if (!cats.contains("TBILLS_USD")) {
+                toAdd.add(lim("US Treasury Bills", "EXPOSURE", "USD", "TBILLS_USD",
+                        "var(--cyan)", "100.00", "1.00", eff));
+            }
+            if (!cats.contains("TBILLS_EUR")) {
+                toAdd.add(lim("BTF / Bons du Trésor", "EXPOSURE", "EUR", "TBILLS_EUR",
+                        "#60A5FA", "50.00", "1.00", eff));
+            }
+            if (toAdd.isEmpty()) return;
+            limitRepo.saveAll(toAdd);
+            log.info("[Bloomberg Mock] ✓ Backfill limites T-Bills : {} ajoutée(s).", toAdd.size());
+        } catch (Exception e) {
+            log.warn("[Bloomberg Mock] Backfill limites T-Bills ignoré : {}", e.getMessage());
+        }
     }
 
     /**
@@ -260,6 +345,11 @@ public class BloombergMockDataLoader implements ApplicationRunner {
             lim("CLN Maroc (USD)", "EXPOSURE", "USD", "CLN_MOROC", "var(--cln)", "50.00",  "5.00", eff),
             lim("CLN GCC (USD)",   "EXPOSURE", "USD", "CLN_GCC",   "#7C3AED",    "30.00",  "5.00", eff),
             lim("EGP Bills (USD)", "EXPOSURE", "USD", "EGP_BILLS", "var(--egp)", "20.00",  "1.00", eff),
+            // T-Bills (USD + EUR) — gérés dans leur écran dédié. Seedés ICI pour
+            // que la limite affichée vienne du BACKEND et non d'un repli front
+            // figé (TBillsView faisait `?? 100/50` car ces lignes manquaient).
+            lim("US Treasury Bills",    "EXPOSURE", "USD", "TBILLS_USD", "var(--cyan)", "100.00", "1.00", eff),
+            lim("BTF / Bons du Trésor", "EXPOSURE", "EUR", "TBILLS_EUR", "#60A5FA",     "50.00",  "1.00", eff),
             // Annual P&L targets (USD millions)
             lim("Eurobond Maroc",  "TARGET",   "USD", "MOROC",     "var(--eb)",  "35.00",  null,   eff),
             lim("Eurobond OCP",    "TARGET",   "USD", "OCP",       "#9B3EEF",    "15.00",  null,   eff),
@@ -349,6 +439,7 @@ public class BloombergMockDataLoader implements ApplicationRunner {
                         .eurUsd(new BigDecimal("1.085100"))
                         .estrRate(new BigDecimal("3.9000"))   // stocké en % : 3.90%
                         .sofrRate(new BigDecimal("5.3300"))   // stocké en % : 5.33%
+                        .sofr10Year(new BigDecimal("3.9000")) // SOFR 10Y, en % : 3.90%
                         .usdEgp(new BigDecimal("48.850000"))
                         .cbeRate(new BigDecimal("27.2500"))   // taux directeur CBE, en % : 27.25%
                         .shockBps(10).build());
@@ -397,7 +488,7 @@ public class BloombergMockDataLoader implements ApplicationRunner {
     private void seedRiskMetrics(Map<String, Instrument> ins, LocalDate today) {
         // modDur   dv01PerM  ytm(%)   hedge   ctdIsin         durCtd   convFact  contractSize  convexity
         List<RiskMetrics> list = List.of(
-            rm(ins.get("XS2595028452"), today,"2.795300","5.320000","5.7200","FVZ5","US91282CME36","4.230000","0.936300",100000,"9.50"),
+            rm(ins.get("XS2595028452"), today,"4.250000","5.320000","5.7200","FVZ5","US91282CME36","4.230000","0.936300",100000,"23.00"),
             rm(ins.get("XS2080771806"), today,"5.314200","7.971300","6.1400","TYZ5","US91282CKT73","8.210000","0.721400",100000,"36.50"),
             rm(ins.get("XS2368905890"), today,"14.23000","7.115000","6.1500","TYZ5","US91282CKT73","8.210000","0.721400",100000,"285.0"),
             rm(ins.get("XS2189848XT7"), today,"3.950000","3.950000","4.4500","RXZ5","DE0001102580","6.120000","0.887500",100000,"18.50"),

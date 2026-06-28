@@ -42,5 +42,12 @@ public interface PricingConfigRepository extends JpaRepository<PricingConfig, Lo
            "(SELECT MAX(p2.configDate) FROM PricingConfig p2) " +
            "ORDER BY p.instrument.isin")
     List<PricingConfig> findLatest();
+
+    // 5. Dernier pricing d'un ISIN (toutes dates) — fallback pour GET /api/pricing/{isin}
+    //    JOIN FETCH (contrairement à findTopBy...) pour un accès sûr à instrument.isin
+    //    hors transaction (open-in-view=false). Prendre .get(0) = le plus récent.
+    @Query("SELECT p FROM PricingConfig p JOIN FETCH p.instrument WHERE p.instrument.isin = :isin " +
+           "ORDER BY p.configDate DESC")
+    List<PricingConfig> findLatestByIsin(@Param("isin") String isin);
 }
 

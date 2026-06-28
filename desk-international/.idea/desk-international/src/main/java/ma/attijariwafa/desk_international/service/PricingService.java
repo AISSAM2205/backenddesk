@@ -40,10 +40,17 @@ public class PricingService {
     }
 
     public PricingDto computeForIsin(String isin, LocalDate date) {
+        // Date exacte, sinon fallback sur le dernier pricing dispo pour cet ISIN
+        // (même résilience que la liste /api/pricing → plus de 400 si la date
+        //  ne tombe pas pile sur un snapshot seedé).
         return pricingRepo.findByIsinAndConfigDate(isin, date)
                 .map(this::compute)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Pas de config pricing pour " + isin + " à " + date));
+                .orElseGet(() -> {
+                    List<PricingConfig> latest = pricingRepo.findLatestByIsin(isin);
+                    if (latest.isEmpty())
+                        throw new IllegalArgumentException("Pas de config pricing pour " + isin);
+                    return compute(latest.get(0));
+                });
     }
 
     private PricingDto compute(PricingConfig cfg) {

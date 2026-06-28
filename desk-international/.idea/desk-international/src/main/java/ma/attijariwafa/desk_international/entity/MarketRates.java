@@ -32,6 +32,13 @@ public class MarketRates {
     @Column(name = "sofr_rate", nullable = false, precision = 10, scale = 6)
     private BigDecimal sofrRate;
 
+    // SOFR 10 ans (taux long USD), stocké en % : ex 3.9000. Nullable pour
+    // rester rétro-compatible avec les lignes seedées avant l'ajout de la
+    // colonne (backfill au démarrage). Exposé tel quel au front (clé JSON
+    // "sofr10Year") — remplace l'ancienne valeur codée en dur côté écran.
+    @Column(name = "sofr_10y", precision = 10, scale = 6)
+    private BigDecimal sofr10Year;
+
     @Column(name = "usd_egp", precision = 10, scale = 4)
     private BigDecimal usdEgp;
 

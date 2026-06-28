@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "antd";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useGovernance } from "../../../contexts/GovernanceContext";
@@ -250,7 +251,17 @@ const FxBkRow = ({ label, value, current, isStopLoss }) => {
 const TBillsView = () => {
   const { rates, loading: ctxLoading } = useTrading();
   const { exposureLimits } = useGovernance();
-  const [tab, setTab] = useState("position");
+  // Onglet déduit de l'URL (?tab=) → deep-linking + refresh-persistant.
+  // On garde les noms tab / setTab : aucun autre code du composant ne change.
+  const TAB_IDS = ["position", "breakeven", "limites"];
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab = TAB_IDS.includes(tabParam) ? tabParam : "position";
+  const setTab = (id) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", id);
+    setSearchParams(next, { replace: true }); // ne pollue pas l'historique
+  };
   const [selectedId, setSelectedId] = useState(null);
   const [allTbills, setAllTbills] = useState([]);
   const [apiLoading, setApiLoading] = useState(false);
@@ -259,6 +270,19 @@ const TBillsView = () => {
 
   const usdMad = parseFloat(rates?.usdMad || 10.035);
   const eurMad = parseFloat(rates?.eurMad || 10.889);
+
+  // FX spot LIVE par devise (USD/MAD ou EUR/MAD). Dans l'Excel, ce spot est une
+  // cellule Bloomberg BDP("…MAD Curncy","LAST_PRICE") qui BOUGE : on l'aligne ici
+  // sur le taux live (mocké backend MarketRates, → blpapi). Sert au « FX Spot
+  // actuel », aux coussins et à l'alerte stop-loss. Repli sur le snapshot backend
+  // t.fxCurrent si rates absent. Breakeven / FX moyen / yields / nominal RESTENT
+  // figés (ce sont des inputs tapés dans l'Excel, pas des cellules Bloomberg).
+  const liveSpot = (t) => {
+    const raw =
+      (t.devise || "USD").toUpperCase() === "EUR" ? rates?.eurMad : rates?.usdMad;
+    const v = parseFloat(raw);
+    return !isNaN(v) && v > 0 ? v : parseFloat(t.fxCurrent || 0);
+  };
 
   const loadTBills = useCallback(async () => {
     setApiLoading(true);
@@ -572,7 +596,7 @@ const TBillsView = () => {
                     {fM(t.plEcoUsd)}
                   </td>
                   <td style={TD("var(--tx2)")}>{fN(t.fxMoyen, 4)}</td>
-                  <td style={TD()}>{fN(t.fxCurrent, 4)}</td>
+                  <td style={TD()}>{fN(liveSpot(t), 4)}</td>
                 </tr>
               ))}
             </tbody>
@@ -701,23 +725,23 @@ const TBillsView = () => {
                 <FxBkRow
                   label="FX Breakeven (avec financement)"
                   value={t.fxBreakevenAvec}
-                  current={t.fxCurrent}
+                  current={liveSpot(t)}
                 />
                 <FxBkRow
                   label="FX Breakeven (sans financement)"
                   value={t.fxBreakevenSans}
-                  current={t.fxCurrent}
+                  current={liveSpot(t)}
                 />
                 <FxBkRow
                   label="FX Stop Loss"
                   value={t.fxStopLoss}
-                  current={t.fxCurrent}
+                  current={liveSpot(t)}
                   isStopLoss
                 />
                 <FxBkRow
                   label="FX Moyen d'acquisition"
                   value={t.fxMoyen}
-                  current={t.fxCurrent}
+                  current={liveSpot(t)}
                 />
                 <div
                   style={{
@@ -745,7 +769,7 @@ const TBillsView = () => {
                       color: "var(--cyan)",
                     }}
                   >
-                    {fN(t.fxCurrent, 4)}
+                    {fN(liveSpot(t), 4)}
                   </span>
                 </div>
               </div>

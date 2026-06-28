@@ -1,5 +1,6 @@
-// src/services/api.js — wired to Spring Boot backend (port 8080)
+// src/services/api.js — wired to Spring Boot backend (port 8081)
 import axios from "axios";
+import keycloak from "./keycloak";
 
 // Empty string → Vite proxy handles /api/* in dev; set env var for production
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -10,16 +11,21 @@ const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem("authToken");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  try {
-    const raw = localStorage.getItem("userData");
-    if (raw) {
-      const u = JSON.parse(raw);
-      if (u?.username) config.headers["X-Username"] = u.username;
+apiClient.interceptors.request.use(async (config) => {
+  // Token Keycloak frais : rafraîchi s'il expire dans < 30 s.
+  if (keycloak?.authenticated) {
+    try {
+      await keycloak.updateToken(30);
+    } catch {
+      /* le timer global de main.jsx relancera le login si besoin */
     }
-  } catch { /* ignore */ }
+    if (keycloak.token) {
+      config.headers.Authorization = `Bearer ${keycloak.token}`;
+      // X-Username conservé pour l'audit côté backend (AuditService).
+      const username = keycloak.tokenParsed?.preferred_username;
+      if (username) config.headers["X-Username"] = username;
+    }
+  }
   return config;
 });
 
@@ -77,6 +83,15 @@ const api = {
     // Expected: 3.9049 years (from RiskService.computePortfolioDuration)
     getDuration: (date = today()) =>
       apiClient.get("/api/risk/duration", { params: { date } }),
+    // GET /api/risk/market[?from&to] → MarketRiskDto (VaR param+historique,
+    // Expected Shortfall, vol annualisée, max drawdown). Source unique backend.
+    // Sans from/to → tout l'historique de P&L journalier.
+    getMarket: (from, to) =>
+      apiClient.get("/api/risk/market", { params: { from, to } }),
+    // GET /api/risk/scenarios[?date] → RateScenarioDto (grille de choc de taux
+    // -100/.../+100 bp : P&L linéaire + ajusté convexité, USD & MAD).
+    getScenarios: (date = today()) =>
+      apiClient.get("/api/risk/scenarios", { params: { date } }),
   },
   external: {
     getCln: (date = today()) =>
@@ -85,6 +100,18 @@ const api = {
       apiClient.get("/api/external/egp", { params: { date } }),
     getTotals: (date = today()) =>
       apiClient.get("/api/external/all", { params: { date } }),
+    // GET /api/external/egp/breakeven → EgpBreakevenDto (BKV FX par deal,
+    // coussins, P&L FX approx.). Source unique backend.
+    getEgpBreakeven: (date = today()) =>
+      apiClient.get("/api/external/egp/breakeven", { params: { date } }),
+  },
+  reporting: {
+    // GET /api/reporting/scenarios?pess&central&opt → ReportingScenarioDto
+    // (projection P&L fin d'année par scénario de taux). Chocs = entrées user.
+    getScenarios: ({ date = today(), pess, central, opt } = {}) =>
+      apiClient.get("/api/reporting/scenarios", {
+        params: { date, pess, central, opt },
+      }),
   },
   tbills: {
     // GET /api/tbills?date=YYYY-MM-DD → List<TBillPosition> (USD + EUR)

@@ -72,6 +72,14 @@ public class GlobalDashboardService {
         BigDecimal totalNominalMad  = ebNominalMad.add(clnNominalMad).add(egpNominalMad);
         BigDecimal portfolioDuration = riskService.computePortfolioDuration(date);
 
+        // ── VaR 1 jour 99 % paramétrique (USD) ───────────────────────
+        // var1dUsd = |DV01| × z(99 %) × σ ; z = 2.33, σ = 7 bp/j.
+        // Budget VaR interne : 2,5 M$ avec plancher adaptatif (var1d/0.55).
+        double dv01Abs = ebDv01 != null ? Math.abs(ebDv01.doubleValue()) : 0.0;
+        double var1dUsd = dv01Abs * 2.33 * 7;
+        double varBudgetUsd = Math.max(2_500_000.0, var1dUsd / 0.55);
+        double varPct = varBudgetUsd > 0 ? (var1dUsd / varBudgetUsd) * 100 : 0;
+
         // ── Breakdown pour le donut chart ────────────────────────────
         Map<String, BreakdownDto> breakdown = new LinkedHashMap<>();
         breakdown.put("EUROBOND", breakdown("Eurobonds MOROC + OCP",
@@ -97,6 +105,10 @@ public class GlobalDashboardService {
                 .totalNominalMad(totalNominalUsd)   // frontend l'utilise en USD directement
                 .totalDv01Usd(ebDv01)
                 .portfolioDuration(portfolioDuration)
+                // VaR 1j 99 % (calcul backend, ex-PortfolioView)
+                .var1dUsd(var1dUsd)
+                .varBudgetUsd(varBudgetUsd)
+                .varPct(varPct)
                 // Breakdown + listes
                 .breakdown(breakdown)
                 .eurobonds(eurobonds)

@@ -19,7 +19,7 @@ import {
   Segmented,
   Badge,
 } from "antd";
-import * as XLSX from "xlsx";
+import { XLSX, styleWorkbook } from "../../../utils/xlsxStyle";
 import { useTrading } from "../../../contexts/TradingContext";
 import { useAuth } from "../../../contexts/AuthContext";
 import { useGovernance } from "../../../contexts/GovernanceContext";
@@ -365,7 +365,7 @@ const ArcGauge = ({ value, max, color, label, valueStr }) => {
 /* ─── Donut Chart (SVG) ──────────────────────────────────────────── */
 const R = 44,
   CIRC = 2 * Math.PI * R;
-const DonutChart = ({ segments }) => {
+const DonutChart = ({ segments, unit }) => {
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (!total)
     return (
@@ -444,6 +444,19 @@ const DonutChart = ({ segments }) => {
       >
         {fUSD(total / 1e6)}M
       </text>
+      {unit && (
+        <text
+          x="55"
+          y="72"
+          textAnchor="middle"
+          fill="var(--tx3)"
+          fontSize="6"
+          fontFamily="Syne,sans-serif"
+          letterSpacing="0.5"
+        >
+          {unit}
+        </text>
+      )}
     </svg>
   );
 };
@@ -820,7 +833,7 @@ const PositionsTable = ({ groups, positions, pnlEco, netDaily, dv01 }) => {
     groups.forEach((g) => {
       const gPnl = g.rows.reduce((s, r) => s + parseFloat(r.pnlEconomicMad || 0), 0);
       const gNet = g.rows.reduce((s, r) => s + parseFloat(r.netDailyMad || 0), 0);
-      const gNom = g.rows.reduce((s, r) => s + parseFloat(r.netNominal || 0), 0);
+      const gNom = g.rows.reduce((s, r) => s + parseFloat(r.netNominalUsd ?? r.netNominal ?? 0), 0);
       out.push({
         key: `grp-${g.catKey}`,
         __group: true,
@@ -938,7 +951,7 @@ const PositionsTable = ({ groups, positions, pnlEco, netDaily, dv01 }) => {
       },
     },
     {
-      title: "Nominal M",
+      title: "Nominal M$",
       key: "nominal",
       align: "right",
       width: 98,
@@ -951,7 +964,7 @@ const PositionsTable = ({ groups, positions, pnlEco, netDaily, dv01 }) => {
           </span>
         ) : (
           <span style={mono("var(--tx1)", 500)}>
-            {fN(parseFloat(r.netNominal || 0) / 1e6, 1)}
+            {fN(parseFloat(r.netNominalUsd ?? r.netNominal ?? 0) / 1e6, 1)}
             <span style={{ color: "var(--tx3)", fontSize: "0.60rem", marginLeft: 2 }}>M</span>
           </span>
         ),
@@ -1105,7 +1118,7 @@ const PositionsTable = ({ groups, positions, pnlEco, netDaily, dv01 }) => {
     },
   ];
 
-  const totalNom = positions.reduce((s, r) => s + parseFloat(r.netNominal || 0), 0);
+  const totalNom = positions.reduce((s, r) => s + parseFloat(r.netNominalUsd ?? r.netNominal ?? 0), 0);
 
   return (
     <Table
@@ -1314,7 +1327,14 @@ const RatesStrip = ({ rates }) => (
 /* ─── G-Spread Watchlist ─────────────────────────────────────────── */
 const GSpreadWatchlist = ({ positions }) => {
   const bonds = (positions || [])
-    .filter((r) => r.gSpreadBid != null)
+    // Watchlist de relative-value CRÉDIT : « Bid vs Target ». On exige une
+    // cible (juste-valeur du desk) → exclut de facto les money-market bills
+    // (EGP / T-Bills) qui n'ont ni spread crédit ni Target, et dont le
+    // G-Spread ~0 n'oscillait qu'en bruit (+1 / −2 bp). Ne restent que les
+    // obligations de crédit (Eurobonds, CLN) où Bid vs Target a du sens.
+    .filter(
+      (r) => r.gSpreadBid != null && parseFloat(r.targetSpread || 0) > 0,
+    )
     .sort((a, b) => {
       const dA =
         parseFloat(a.gSpreadBid || 0) - parseFloat(a.targetSpread || 0);
@@ -1677,6 +1697,13 @@ const MaturityLadder = ({ positions, rates }) => {
               const lblNom = empty
                 ? "—"
                 : `${m >= 100 ? m.toFixed(0) : m.toFixed(1)}M`;
+              // Label nominal lisible même sur la tranche DOMINANTE : si la barre
+              // est si haute que le label retomberait DEDANS, on le place dans le
+              // haut de la barre en BLANC (sinon couleur barre sur barre =
+              // illisible, le bug du « 97.1M » flottant). Sinon : au-dessus, en b.color.
+              const lblInside = y - 5 < padT + 9;
+              const lblY = lblInside ? padT + 11 : y - 5;
+              const lblFill = empty ? "var(--tx3)" : lblInside ? "#fff" : b.color;
               return (
                 <g key={b.key}>
                   <rect
@@ -1690,9 +1717,9 @@ const MaturityLadder = ({ positions, rates }) => {
                      pour ne pas sortir du cadre sur la tranche dominante). */}
                   <text
                     x={x + barW / 2}
-                    y={Math.max(y - 5, padT + 9)}
+                    y={lblY}
                     textAnchor="middle"
-                    fill={empty ? "var(--tx3)" : b.color}
+                    fill={lblFill}
                     fontSize={7.5}
                     fontFamily="JetBrains Mono,monospace"
                     fontWeight={700}
@@ -1830,8 +1857,6 @@ const MaturityLadder = ({ positions, rates }) => {
 };
 
 /* ─── Coupon Calendar ────────────────────────────────────────────── */
-const USD_MAD_REF = 9.251;
-
 const nextSemiAnnualCoupon = (matStr) => {
   if (!matStr) return null;
   const today = new Date();
@@ -1861,9 +1886,15 @@ const fDateLong = (dt) => {
   });
 };
 
-const CouponCalendar = ({ positions }) => {
+const CouponCalendar = ({ positions, rates }) => {
   const events = useMemo(() => {
     const today = new Date();
+    // FX LIVE (repli = valeurs seedées, cohérent avec assetBreakdown du même
+    // écran). La conversion respecte la DEVISE du bond : un coupon EUR est
+    // converti via EUR/MAD, un coupon USD via USD/MAD — plus de taux figé.
+    const usdMad = parseFloat(rates?.usdMad) || 10.0347;
+    const eurMad = parseFloat(rates?.eurMad) || 10.8891;
+    const eurUsd = parseFloat(rates?.eurUsd) || 1.0851;
     return (positions || [])
       .filter((r) => r.couponRate && r.maturityDate && r.netNominal)
       .map((r) => {
@@ -1871,16 +1902,20 @@ const CouponCalendar = ({ positions }) => {
         if (!nextDate) return null;
         const daysLeft = Math.round((nextDate - today) / 86400000);
         const rate = parseFloat(r.couponRate);
-        const nominal = parseFloat(r.netNominal);
+        const nominal = parseFloat(r.netNominal); // nominal en devise native
         const effectiveRate = rate < 1 ? rate : rate / 100;
-        const couponAmtUsd = (effectiveRate * nominal) / 2;
+        const couponAmtCcy = (effectiveRate * nominal) / 2; // coupon semi-annuel, devise native
+        const ccy = (r.currency || "USD").toUpperCase();
+        // USD pour la colonne USD (EUR → ×EUR/USD), MAD selon la devise du bond.
+        const couponAmtUsd = ccy === "EUR" ? couponAmtCcy * eurUsd : couponAmtCcy;
+        const couponAmtMad = ccy === "EUR" ? couponAmtCcy * eurMad : couponAmtCcy * usdMad;
         return {
           isin: r.isin,
           desc: r.description,
           nextDate,
           daysLeft,
           couponAmtUsd,
-          couponAmtMad: couponAmtUsd * USD_MAD_REF,
+          couponAmtMad,
           couponRatePct: (effectiveRate * 100).toFixed(2),
           subAsset: r.subAsset,
         };
@@ -1888,7 +1923,7 @@ const CouponCalendar = ({ positions }) => {
       .filter(Boolean)
       .sort((a, b) => a.daysLeft - b.daysLeft)
       .slice(0, 10);
-  }, [positions]);
+  }, [positions, rates]);
 
   if (!events.length) return null;
 
@@ -2634,6 +2669,7 @@ const PortfolioView = () => {
     wsLadder["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsLadder, "Maturity Ladder");
 
+    styleWorkbook(wb);
     XLSX.writeFile(wb, `morning_report_${selectedDate}_${ts}.xlsx`);
   }, [globalDashboard, positions, dashboardRows, rates, pnlEco, pnlAcct, netDaily,
       nomUsd, dur, dv01, selectedDate]);
@@ -2653,10 +2689,22 @@ const PortfolioView = () => {
 
   /* VaR 1-jour 99 % (paramétrique) = DV01 × z(99 %) × σ taux quotidienne.
      σ ≈ 7 bp/j (govvies + crédit IG), z = 2.33. Budget VaR interne du desk :
-     2,5 M$ avec plancher adaptatif → la jauge reste lisible et réaliste. */
-  const var1dUsd = Math.abs(dv01) * 2.33 * 7;
-  const varBudgetUsd = Math.max(2_500_000, var1dUsd / 0.55);
-  const varPct = varBudgetUsd > 0 ? (var1dUsd / varBudgetUsd) * 100 : 0;
+     2,5 M$ avec plancher adaptatif → la jauge reste lisible et réaliste.
+     SOURCE : backend (GlobalDashboardService) ; calcul local en repli. */
+  const var1dUsd =
+    globalDashboard?.var1dUsd != null
+      ? parseFloat(globalDashboard.var1dUsd)
+      : Math.abs(dv01) * 2.33 * 7;
+  const varBudgetUsd =
+    globalDashboard?.varBudgetUsd != null
+      ? parseFloat(globalDashboard.varBudgetUsd)
+      : Math.max(2_500_000, var1dUsd / 0.55);
+  const varPct =
+    globalDashboard?.varPct != null
+      ? parseFloat(globalDashboard.varPct)
+      : varBudgetUsd > 0
+        ? (var1dUsd / varBudgetUsd) * 100
+        : 0;
 
   /* Concentration Top-5 : part du nominal détenue par les 5 plus grosses
      positions. Vraie mesure de risque de concentration, bornée 0–100 %.
@@ -2799,12 +2847,12 @@ const PortfolioView = () => {
               />
               <KpiCard
                 label="Nominal Total"
-                value={fUSD(nomUsd)}
-                sub={`${eurobonds.length} obligations actives`}
+                value={`${fUSD(nomUsd)} $`}
+                sub={`${positions.length} positions actives`}
                 topClass="kpi-top-blue"
                 valueColor="var(--tx1)"
                 animClass="slide-up stagger-4"
-                tooltip="Exposition nominale totale du book en USD"
+                tooltip="Exposition nominale totale du book, convertie en USD (devises homogènes)"
               />
             </div>
           </div>
@@ -2855,7 +2903,6 @@ const PortfolioView = () => {
                 { label: "Dur. Maroc", val: durationByIssuer.MAROC, color: "#34D399" },
                 { label: "Dur. OCP", val: durationByIssuer.OCP, color: "#C084FC" },
                 { label: "Dur. Égypte", val: durationByIssuer.EGYPTE, color: "#FCD34D" },
-                { label: "Dur. Globale", val: dur != null ? parseFloat(dur) : null, color: "#60A5FA" },
               ].map((it) => (
                 <div
                   key={it.label}
@@ -3017,17 +3064,22 @@ const PortfolioView = () => {
 
           {/* ── P&L Bridge — Décomposition composants ── */}
           {pnlEco !== 0 && globalDashboard && (() => {
-            const latent   = parseFloat(globalDashboard.totalPlLatentMad   || 0);
+            // Delta de prix intraday (MtM live) = de la P&L LATENTE → on l'ajoute
+            // à la ligne « MtM Latent » pour que le Bridge respire et RÉCONCILIE
+            // EXACTEMENT l'entête (P&L Éco/Comptable live). En date historique
+            // (J-1/J-5) il n'y a pas de live → delta nul.
+            const bridgeDelta = isHistoricalDate ? 0 : liveDelta;
+            const latent   = parseFloat(globalDashboard.totalPlLatentMad   || 0) + bridgeDelta;
             const realized = parseFloat(globalDashboard.totalPlRealizedMad || 0);
             const coupons  = parseFloat(globalDashboard.totalCouponsMad    || 0);
             const funding  = parseFloat(globalDashboard.totalFundingCostMad || 0);
-            const accounting = latent + realized + coupons; // = P&L Comptable (Excel col. X)
+            const accounting = latent + realized + coupons; // = P&L Comptable (Excel col. X), MtM live incluse
             const computed = accounting - funding;
-            // Le bridge décompose TOUJOURS le P&L éco COURANT du book : ses
-            // composantes (latent/réalisé/coupons/funding) sont celles
-            // d'aujourd'hui, donc on réconcilie l'agrégat REST courant — JAMAIS
-            // le P&L « as-of date » (J-1/J-5), sinon faux écart de réconciliation.
-            const pnlEcoBridge = parseFloat(globalDashboard.totalPlEcoMad || 0);
+            // P&L éco de référence = la MÊME valeur live que l'entête (sinon écart
+            // visuel entête↔Bridge). En historique → agrégat REST de clôture.
+            const pnlEcoBridge = isHistoricalDate
+              ? parseFloat(globalDashboard.totalPlEcoMad || 0)
+              : parseFloat(liveTotals?.totalPlEcoMad ?? globalDashboard.totalPlEcoMad ?? 0);
             const residual = pnlEcoBridge - computed;
             const isBalanced =
               Math.abs(residual) < Math.max(Math.abs(pnlEcoBridge) * 0.005, 10000);
@@ -3652,7 +3704,7 @@ const PortfolioView = () => {
           </div>
 
           {/* ── Coupon Calendar ── */}
-          <CouponCalendar positions={positions} />
+          <CouponCalendar positions={positions} rates={rates} />
 
           {/* ── Analytics Row ── */}
           <div
@@ -3668,7 +3720,7 @@ const PortfolioView = () => {
               </p>
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <div style={{ width: 120, height: 120, flexShrink: 0 }}>
-                  <DonutChart segments={donutSegs} />
+                  <DonutChart segments={donutSegs} unit="MAD" />
                 </div>
                 <div
                   style={{

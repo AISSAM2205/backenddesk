@@ -11,6 +11,7 @@ import ma.attijariwafa.desk_international.service.WapCalculatorService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import static java.math.BigDecimal.ZERO;
 
@@ -42,13 +43,19 @@ public class TradeService {
                 ? dto.getDirtyPrice()
                 : dto.getCleanPrice().add(acc);
 
+        // Dates par défaut : trade = aujourd'hui, règlement = T+2 (standard marché).
+        // La colonne trade_date est NOT NULL → on garantit une valeur même si le
+        // client (Postman/front) ne l'envoie pas, au lieu de planter en 500.
+        LocalDate tradeDate = dto.getTradeDate() != null ? dto.getTradeDate() : LocalDate.now();
+        LocalDate valueDate = dto.getValueDate() != null ? dto.getValueDate() : tradeDate.plusDays(2);
+
         // Construire le trade
         Trade trade = Trade.builder()
                 .assetIdentifier(dto.getIsin())
                 .bondInstrument(instr)
                 .subAsset(instr.getSubAsset())
-                .tradeDate(dto.getTradeDate())
-                .valueDate(dto.getValueDate())
+                .tradeDate(tradeDate)
+                .valueDate(valueDate)
                 .way(dto.getWay().toUpperCase())
                 .nominal(dto.getNominal().abs())
                 .cleanPrice(dto.getCleanPrice())
@@ -83,7 +90,7 @@ public class TradeService {
         Trade trade = Trade.builder()
                 .assetIdentifier(dto.getTicker())
                 .subAsset("Future")
-                .tradeDate(dto.getTradeDate())
+                .tradeDate(dto.getTradeDate() != null ? dto.getTradeDate() : LocalDate.now())
                 .way(dto.getWay().toUpperCase())
                 .nominal(BigDecimal.valueOf(dto.getNbContracts()))
                 .nbContracts(dto.getNbContracts())

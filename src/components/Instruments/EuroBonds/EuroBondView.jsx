@@ -441,7 +441,7 @@ const Row = ({ r, idx }) => {
         {r.currency || "—"}
       </td>
       <td style={{ ...nb }}>
-        {fN(parseFloat(r.netNominal || 0) / 1e6, 1)}
+        {fN(parseFloat(r.netNominalUsd ?? r.netNominal ?? 0) / 1e6, 1)}
         <span
           style={{ color: "var(--tx3)", fontSize: "0.58rem", marginLeft: 1 }}
         >
@@ -627,18 +627,35 @@ const EuroBondView = () => {
     });
   }, []);
 
-  const currencies = useMemo(
-    () => [...new Set(dashboardRows.map((r) => r.currency).filter(Boolean))],
+  // Market Watch — EUROBONDS uniquement : on exclut CLN / EGP / bills / futures
+  // (chacun a son propre écran). Sans ce filtre, les T-Bills EGP (EG…) et la CLN
+  // s'affichaient à tort dans cet écran « EuroBonds ».
+  const eurobondRows = useMemo(
+    () =>
+      dashboardRows.filter((r) => {
+        const s = (r.subAsset || "").toLowerCase();
+        return (
+          !s.includes("cln") &&
+          !s.includes("egp") &&
+          !s.includes("bill") &&
+          !s.includes("future")
+        );
+      }),
     [dashboardRows],
   );
+
+  const currencies = useMemo(
+    () => [...new Set(eurobondRows.map((r) => r.currency).filter(Boolean))],
+    [eurobondRows],
+  );
   const subAssets = useMemo(
-    () => [...new Set(dashboardRows.map((r) => r.subAsset).filter(Boolean))],
-    [dashboardRows],
+    () => [...new Set(eurobondRows.map((r) => r.subAsset).filter(Boolean))],
+    [eurobondRows],
   );
 
   const filtered = useMemo(
     () =>
-      dashboardRows.filter((r) => {
+      eurobondRows.filter((r) => {
         const q = search.toLowerCase();
         return (
           (!q ||
@@ -648,7 +665,7 @@ const EuroBondView = () => {
           (filterSub === "ALL" || r.subAsset === filterSub)
         );
       }),
-    [dashboardRows, search, filterCcy, filterSub],
+    [eurobondRows, search, filterCcy, filterSub],
   );
 
   const sorted = useMemo(() => {
@@ -668,7 +685,7 @@ const EuroBondView = () => {
     () =>
       sorted.reduce(
         (acc, r) => ({
-          nominal: acc.nominal + parseFloat(r.netNominal || 0),
+          nominal: acc.nominal + parseFloat(r.netNominalUsd ?? r.netNominal ?? 0),
           pnlEco: acc.pnlEco + parseFloat(r.pnlEconomicMad || 0),
           pnlAcct: acc.pnlAcct + parseFloat(r.pnlAccountingMad || 0),
           netDaily: acc.netDaily + parseFloat(r.netDailyMad || 0),
@@ -889,7 +906,7 @@ const EuroBondView = () => {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <h2 className="view-title">Market Watch — EuroBonds</h2>
                 <span className="tag tag-blue">
-                  {sorted.length} / {dashboardRows.length} ISIN
+                  {sorted.length} / {eurobondRows.length} ISIN
                 </span>
               </div>
               <p className="view-sub">

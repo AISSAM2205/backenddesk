@@ -2674,8 +2674,11 @@ const PortfolioView = () => {
   }, [globalDashboard, positions, dashboardRows, rates, pnlEco, pnlAcct, netDaily,
       nomUsd, dur, dv01, selectedDate]);
 
+  // USD → EUR : on DIVISE par EUR/USD (= usdMad/eurMad). Exposition EUR =
+  // nominal USD × (USDMAD / EURMAD). (Avant : eurMad/usdMad → sens inversé,
+  // surévaluait la consommation de limite.)
   const exposureEur =
-    nomUsd * ((rates?.eurMad || 10.72) / (rates?.usdMad || 9.251));
+    nomUsd * ((rates?.usdMad || 9.251) / (rates?.eurMad || 10.72));
   /* Limite effective = limite applicable au trader (useGovernance), toujours
      définie : limite trader admin > plafond desk EUROBONDS > défaut. Plus aucun
      mock — la jauge reflète l'exposition réelle vs une vraie limite. */

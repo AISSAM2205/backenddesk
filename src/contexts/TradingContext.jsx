@@ -317,19 +317,18 @@ export const TradingProvider = ({ children }) => {
       dispatch({ type: "SET_DASHBOARD_ROWS", payload: rows });
 
       // ── Global dashboard ─────────────────────────────────────────
-      // On privilégie la consolidation client-side (computeGlobal sur les
-      // lignes enrichies) : cohérente en MAD, coupons inclus, multi-classe.
-      // L'agrégat backend ne sert que de filet si aucune ligne n'est dispo.
-      if (rows.length > 0) {
-        dispatch({
-          type: "SET_GLOBAL_DASHBOARD",
-          payload: computeGlobal(rows),
-        });
-      } else if (globalRes.status === "fulfilled" && globalRes.value.data) {
-        dispatch({
-          type: "SET_GLOBAL_DASHBOARD",
-          payload: globalRes.value.data,
-        });
+      // SOURCE DE VÉRITÉ = agrégat BACKEND (/api/dashboard/global). computeGlobal
+      // ne sert que de SOCLE (fusion : il remplit un éventuel champ absent du
+      // backend), mais le backend ÉCRASE tous les champs communs. Repli total sur
+      // computeGlobal seulement si le backend ne répond pas.
+      const frontG = rows.length > 0 ? computeGlobal(rows) : null;
+      const backendG =
+        globalRes.status === "fulfilled" && globalRes.value.data
+          ? globalRes.value.data
+          : null;
+      const mergedG = backendG ? { ...(frontG || {}), ...backendG } : frontG;
+      if (mergedG) {
+        dispatch({ type: "SET_GLOBAL_DASHBOARD", payload: mergedG });
       }
 
       // ── Market rates (optional, UI adapts gracefully) ────────────
@@ -349,13 +348,13 @@ export const TradingProvider = ({ children }) => {
         durationRes.value.data != null
       ) {
         dispatch({ type: "SET_DURATION", payload: durationRes.value.data });
-        // Also update globalDashboard.portfolioDuration with the precise value
-        if (rows.length > 0) {
-          const g = computeGlobal(rows);
+        // Duration précise (endpoint dédié) injectée sur la MÊME source de
+        // vérité (mergedG : backend prioritaire, computeGlobal en socle).
+        if (mergedG) {
           dispatch({
             type: "SET_GLOBAL_DASHBOARD",
             payload: {
-              ...g,
+              ...mergedG,
               portfolioDuration: parseFloat(durationRes.value.data),
             },
           });

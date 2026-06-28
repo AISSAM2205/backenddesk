@@ -39,6 +39,7 @@ export function useLiveDesk() {
     let totalPlEcoMad = 0;
     let totalPlLatentMad = 0;
     let baseEcoMad = 0;
+    let baseLatentMad = 0;
     let liveCount = 0;
 
     const rows = (dashboardRows || []).map((r) => {
@@ -46,6 +47,7 @@ export function useLiveDesk() {
       const baseEco = num(r.pnlEconomicMad);
       const baseLatent = num(r.pnlLatentMad);
       baseEcoMad += baseEco;
+      baseLatentMad += baseLatent;
 
       const refMid = num(r.pxMid); // fraction de pair (ex. 1.0275)
       if (!tick || refMid <= 0) {
@@ -114,11 +116,26 @@ export function useLiveDesk() {
       };
     });
 
+    // NIVEAU PROD — le BACKEND est la source unique de vérité pour l'agrégat P&L.
+    // Le flux live n'ajoute QUE le delta MtM intraday (somme des variations de
+    // prix) PAR-DESSUS le chiffre backend, exactement comme un vrai desk. Au repos
+    // (prix = référence seedée) le delta est nul → l'écran affiche EXACTEMENT le
+    // P&L backend (/api/dashboard/global). Repli sur la somme des lignes seulement
+    // si le backend n'a pas fourni d'agrégat (mode dégradé).
+    const liveDeltaMad = totalPlEcoMad - baseEcoMad;
+    const ecoBaseline =
+      globalDashboard?.totalPlEcoMad != null
+        ? num(globalDashboard.totalPlEcoMad)
+        : baseEcoMad;
+    const latentBaseline =
+      globalDashboard?.totalPlLatentMad != null
+        ? num(globalDashboard.totalPlLatentMad)
+        : baseLatentMad;
     const totals = {
       ...(globalDashboard || {}),
-      totalPlEcoMad,
-      totalPlLatentMad,
-      _liveDeltaMad: totalPlEcoMad - baseEcoMad,
+      totalPlEcoMad: ecoBaseline + liveDeltaMad,
+      totalPlLatentMad: latentBaseline + liveDeltaMad,
+      _liveDeltaMad: liveDeltaMad,
       _liveCount: liveCount,
     };
 

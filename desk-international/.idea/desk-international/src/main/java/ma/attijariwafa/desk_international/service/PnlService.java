@@ -98,8 +98,18 @@ public class PnlService {
         BigDecimal pnlLatent = pos.getNetNominal()
                 .multiply(perfWap).setScale(2, RoundingMode.HALF_UP);
 
-        // ── FORMULE 4 : Coupons reçus ─────────────────────────────────
-        BigDecimal coupons = cpnRepo.sumByIsin(pos.getIsin()).orElse(ZERO);
+        // ── FORMULE 4 : Coupon couru YTD (ACCRUAL, pas le cash reçu) ──
+        // (taux coupon ÷ 100 × nominal) × joursÉcoulés/365 — base accrual,
+        // cohérente avec un P&L économique. AVANT : cpnRepo.sumByIsin = somme du
+        // cash réellement encaissé → surévaluait fortement le P&L (95 M vs 14 M).
+        int ytdDays = date.getDayOfYear() - 1;
+        BigDecimal cpnRt = pos.getCouponRate() != null ? pos.getCouponRate() : ZERO;
+        BigDecimal coupons = cpnRt
+                .divide(BD100, 8, RoundingMode.HALF_UP)
+                .multiply(pos.getNetNominal())
+                .multiply(BigDecimal.valueOf(ytdDays))
+                .divide(BD365, 6, RoundingMode.HALF_UP)
+                .setScale(2, RoundingMode.HALF_UP);
 
         // ── FORMULE 5 : P&L Total devise ─────────────────────────────
         BigDecimal real     = pos.getTotalRealizedPnl() != null ? pos.getTotalRealizedPnl() : ZERO;

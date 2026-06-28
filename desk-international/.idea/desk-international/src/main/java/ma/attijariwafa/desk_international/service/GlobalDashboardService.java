@@ -31,21 +31,31 @@ public class GlobalDashboardService {
         BigDecimal eurMad = rates != null ? rates.getEurMad() : new BigDecimal("10.8891");
 
         // ── EUROBONDS (Desk International) ───────────────────────────
-        List<DashboardDto> eurobonds = dashboardService.buildDashboard(date);
+        // UNIQUEMENT les eurobonds : CLN et EGP arrivent via les snapshots
+        // externes (plus bas). Sans ce filtre ils étaient comptés DEUX FOIS
+        // (dans les lignes ET dans les snapshots) → nominal et P&L surévalués
+        // (et l'EGP en devise EGP était sommé comme de l'USD).
+        List<DashboardDto> eurobonds = dashboardService.buildDashboard(date).stream()
+                .filter(d -> {
+                    String s = d.getSubAsset() == null ? "" : d.getSubAsset().toLowerCase();
+                    return !s.contains("cln") && !s.contains("egp")
+                            && !s.contains("bill") && !s.contains("future");
+                })
+                .toList();
 
         BigDecimal ebPlEcoMad    = sum(eurobonds, d -> d.getPnlEconomicMad());
         BigDecimal ebAcctMad     = sum(eurobonds, d -> d.getPnlAccountingMad());
         BigDecimal ebNetDailyMad = sum(eurobonds, d -> d.getNetDailyMad());
         BigDecimal ebFundingMad  = sum(eurobonds, d -> d.getFundingCostMad());
         BigDecimal ebThetaMad    = sum(eurobonds, d -> d.getCpnThetaMad());
-        BigDecimal ebLatentCcy   = sum(eurobonds, d -> d.getPnlLatentCcy());
-        BigDecimal ebRealizedCcy = sum(eurobonds, d -> d.getPnlRealizedCcy());
-        BigDecimal ebCouponsCcy  = sum(eurobonds, d -> d.getCouponsCcy());
+        // Latent / Réalisé / Coupons CONVERTIS EN MAD par la devise de chaque
+        // ligne. (Sommer les *Ccy directement mélangerait EUR et USD → faux ;
+        //  le P&L Bridge ne se réconciliait alors qu'approximativement.)
+        BigDecimal ebLatentMad   = sumMad(eurobonds, DashboardDto::getPnlLatentCcy,   eurMad, usdMad);
+        BigDecimal ebRealizedMad = sumMad(eurobonds, DashboardDto::getPnlRealizedCcy, eurMad, usdMad);
+        BigDecimal ebCouponsMad  = sumMad(eurobonds, DashboardDto::getCouponsCcy,     eurMad, usdMad);
         BigDecimal ebDv01        = sum(eurobonds, d -> d.getDv01Bond());
-        BigDecimal ebNominalUsd  = eurobonds.stream()
-                .filter(d -> d.getNetNominal() != null && d.getNetNominal().compareTo(ZERO) > 0)
-                .map(DashboardDto::getNetNominal)
-                .reduce(ZERO, BigDecimal::add);
+        // Nominal eurobonds EN MAD (chaque ligne convertie par SA devise).
         BigDecimal ebNominalMad  = eurobonds.stream()
                 .filter(d -> d.getNetNominal() != null && d.getNetNominal().compareTo(ZERO) > 0)
                 .map(d -> {
@@ -53,6 +63,12 @@ public class GlobalDashboardService {
                     return d.getNetNominal().multiply(fx);
                 })
                 .reduce(ZERO, BigDecimal::add);
+        // … puis EN USD HOMOGÈNE = total MAD ÷ USDMAD (cohérent avec le front).
+        // AVANT : somme brute des netNominal, qui additionnait EUR + USD sans
+        // conversion → nominal surévalué (mélange de devises).
+        BigDecimal ebNominalUsd  = usdMad.compareTo(ZERO) > 0
+                ? ebNominalMad.divide(usdMad, 2, RoundingMode.HALF_UP)
+                : ZERO;
 
         // ── CLN (desk externe — snapshot) ────────────────────────────
         List<ExternalPnlSnapshot> clnList = resolveExternal("CLN", date);
@@ -98,9 +114,9 @@ public class GlobalDashboardService {
                 .totalFundingCostMad(ebFundingMad)
                 .totalCpnThetaMad(ebThetaMad)
                 // CCY (nommés Mad pour compat frontend)
-                .totalPlLatentMad(ebLatentCcy)
-                .totalPlRealizedMad(ebRealizedCcy)
-                .totalCouponsMad(ebCouponsCcy)
+                .totalPlLatentMad(ebLatentMad)
+                .totalPlRealizedMad(ebRealizedMad)
+                .totalCouponsMad(ebCouponsMad)
                 // Exposition
                 .totalNominalMad(totalNominalUsd)   // frontend l'utilise en USD directement
                 .totalDv01Usd(ebDv01)
@@ -130,6 +146,16 @@ public class GlobalDashboardService {
                            java.util.function.Function<DashboardDto, BigDecimal> fn) {
         return rows.stream().map(fn)
                 .filter(Objects::nonNull)
+                .reduce(ZERO, BigDecimal::add);
+    }
+
+    /** Somme d'un champ CCY converti EN MAD ligne par ligne (EUR→eurMad, sinon usdMad). */
+    private BigDecimal sumMad(List<DashboardDto> rows,
+                              java.util.function.Function<DashboardDto, BigDecimal> fn,
+                              BigDecimal eurMad, BigDecimal usdMad) {
+        return rows.stream()
+                .filter(d -> fn.apply(d) != null)
+                .map(d -> fn.apply(d).multiply("EUR".equals(d.getCurrency()) ? eurMad : usdMad))
                 .reduce(ZERO, BigDecimal::add);
     }
 
